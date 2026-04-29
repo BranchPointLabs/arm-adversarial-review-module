@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ARM Reviewer</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="shell">
+      <section class="input-pane">
+        <header class="topbar">
+          <div>
+            <h1>ARM</h1>
+            <p>Adversarial Review Model</p>
+          </div>
+          <button id="openFile" type="button">Open File</button>
+        </header>
+
+        <label class="field">
+          <span>Artifact</span>
+          <textarea id="artifact" spellcheck="false" placeholder="Paste a PRD, RFC, idea, or pitch here."></textarea>
+        </label>
+
+        <div class="grid">
+          <label class="field">
+            <span>Review Type</span>
+            <select id="type">
+              <option value="idea">Idea</option>
+              <option value="prd">PRD</option>
+              <option value="rfc">RFC</option>
+              <option value="executive">Executive</option>
+              <option value="roast">Roast</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Backend</span>
+            <select id="backend">
+              <option value="heuristic">Heuristic</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <input id="model" value="gpt-4.1-mini">
+          </label>
+
+          <label class="field">
+            <span>Max Words</span>
+            <input id="maxWords" type="number" min="50" value="700">
+          </label>
+        </div>
+
+        <label class="field">
+          <span>OpenAI API Key</span>
+          <input id="apiKey" type="password" placeholder="Only used locally for this run">
+        </label>
+
+        <div class="actions">
+          <button id="review" type="button">Review</button>
+          <button id="roast" type="button">Roast</button>
+          <button id="decide" type="button">Decide</button>
+        </div>
+
+        <p id="status" class="status">Ready.</p>
+      </section>
+
+      <section class="output-pane">
+        <header class="output-header">
+          <h2>Output</h2>
+          <div>
+            <button id="copy" type="button">Copy</button>
+            <button id="save" type="button">Save</button>
+          </div>
+        </header>
+        <pre id="output">===============&#10;ARM REVIEW&#10;&#10;1. Add an artifact and run a review.&#10;===============</pre>
+      </section>
+    </main>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

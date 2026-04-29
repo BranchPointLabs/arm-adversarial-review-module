@@ -1,0 +1,23 @@
+{
+  "name": "arm",
+  "version": "0.1.0",
+  "description": "Adversarial Review Model CLI",
+  "private": true,
+  "bin": {
+    "arm": "./bin/arm.js"
+  },
+  "scripts": {
+    "start": "node ./bin/arm.js",
+    "check": "node ./scripts/smoke-test.js",
+    "desktop:check": "node ./scripts/desktop-smoke-test.js",
+    "electron": "electron .",
+    "desktop": "electron ."
+  },
+  "main": "electron/main.js",
+  "devDependencies": {
+    "electron": "^33.4.11"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
