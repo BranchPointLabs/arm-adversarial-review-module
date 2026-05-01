@@ -194,26 +194,6 @@ fn create_project(state: tauri::State<AppState>, name: String) -> Result<Project
         params![id, trimmed, now, now],
       )
       .map_err(to_err)?;
-    conn
-      .execute(
-        "INSERT INTO current_context (project_id, markdown, updated_at) VALUES (?1, ?2, ?3)",
-        params![id, default_context(trimmed), now],
-      )
-      .map_err(to_err)?;
-    conn
-      .execute(
-        "INSERT INTO documents (id, project_id, name, document_type, markdown, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-          Uuid::new_v4().to_string(),
-          id,
-          "Initial Idea",
-          "IDEA",
-          default_document_markdown("Initial Idea", "IDEA"),
-          now,
-          now
-        ],
-      )
-      .map_err(to_err)?;
 
     Ok(Project {
       id,
@@ -235,7 +215,6 @@ fn create_project(state: tauri::State<AppState>, name: String) -> Result<Project
 fn list_documents(project_path: String) -> Result<Vec<ProjectDocument>, String> {
   let project_path = PathBuf::from(project_path);
   let conn = open_project_conn(&project_path)?;
-  ensure_default_document(&conn).map_err(to_err)?;
 
   let mut stmt = conn
     .prepare(
@@ -271,6 +250,7 @@ fn create_document(project_path: String, name: String, document_type: String) ->
       params![id, project_id, trimmed, document_type, markdown, now, now],
     )
     .map_err(to_err)?;
+  sync_context_mirror(&project_path, &conn, &project_id, &markdown, &now).map_err(to_err)?;
   touch_project(&conn, &now).map_err(to_err)?;
 
   Ok(ProjectDocument {
@@ -288,7 +268,6 @@ fn create_document(project_path: String, name: String, document_type: String) ->
 fn load_document(project_path: String, document_id: String) -> Result<ProjectDocument, String> {
   let project_path = PathBuf::from(project_path);
   let conn = open_project_conn(&project_path)?;
-  ensure_default_document(&conn).map_err(to_err)?;
 
   conn
     .query_row(
@@ -305,6 +284,7 @@ fn save_document(project_path: String, document_id: String, markdown: String) ->
   let conn = open_project_conn(&project_path)?;
   let markdown = ensure_trailing_newline(&markdown);
   let now = Utc::now().to_rfc3339();
+  let project_id = get_project_id(&conn).map_err(to_err)?;
 
   conn
     .execute(
@@ -312,6 +292,7 @@ fn save_document(project_path: String, document_id: String, markdown: String) ->
       params![markdown, now, document_id],
     )
     .map_err(to_err)?;
+  sync_context_mirror(&project_path, &conn, &project_id, &markdown, &now).map_err(to_err)?;
   touch_project(&conn, &now).map_err(to_err)?;
   Ok(())
 }
@@ -320,7 +301,11 @@ fn save_document(project_path: String, document_id: String, markdown: String) ->
 fn load_current_context(project_path: String) -> Result<String, String> {
   let project_path = PathBuf::from(project_path);
   let file = project_path.join("context").join("CURRENT_CONTEXT.md");
-  fs::read_to_string(file).map_err(to_err)
+  match fs::read_to_string(file) {
+    Ok(value) => Ok(value),
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+    Err(error) => Err(to_err(error)),
+  }
 }
 
 #[command]
@@ -660,13 +645,6 @@ fn init_project_folder(project_path: &Path) -> std::io::Result<()> {
   fs::create_dir_all(project_path.join("references"))?;
   fs::create_dir_all(project_path.join("runs"))?;
 
-  let context_file = project_path.join("context").join("CURRENT_CONTEXT.md");
-  fs::write(
-    &context_file,
-    ensure_trailing_newline(&default_context(
-      project_path.file_name().unwrap_or_default().to_string_lossy(),
-    )),
-  )?;
   fs::write(project_path.join("context").join("decisions.md"), ensure_trailing_newline("# Decisions\n"))?;
   fs::write(project_path.join("context").join("idea_log.md"), ensure_trailing_newline("# Idea Log\n"))?;
   Ok(())
@@ -771,25 +749,6 @@ fn get_project_id(conn: &Connection) -> rusqlite::Result<String> {
   conn.query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
 }
 
-fn ensure_default_document(conn: &Connection) -> rusqlite::Result<()> {
-  let count: i64 = conn.query_row("SELECT COUNT(*) FROM documents", [], |row| row.get(0))?;
-  if count > 0 {
-    return Ok(());
-  }
-
-  let project_id = get_project_id(conn)?;
-  let project_name: String = conn.query_row("SELECT name FROM projects LIMIT 1", [], |row| row.get(0))?;
-  let markdown = conn
-    .query_row("SELECT markdown FROM current_context LIMIT 1", [], |row| row.get(0))
-    .unwrap_or_else(|_| default_document_markdown(&project_name, "IDEA"));
-  let now = Utc::now().to_rfc3339();
-  conn.execute(
-    "INSERT INTO documents (id, project_id, name, document_type, markdown, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-    params![Uuid::new_v4().to_string(), project_id, "Current Idea", "IDEA", markdown, now, now],
-  )?;
-  Ok(())
-}
-
 fn load_reference(conn: &Connection, reference_id: &str) -> Result<ProjectReference, String> {
   conn
     .query_row(
@@ -853,11 +812,30 @@ fn map_agent_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentCard> {
   })
 }
 
-fn default_context(name: impl AsRef<str>) -> String {
-  format!(
-    "# Current Context\n\n## What this project is\n- {}\n\n## Current direction\n- \n\n## Important decisions\n- \n\n## Constraints\n- \n\n## Open questions\n- \n\n## Risks\n- \n\n## Next actions\n- \n",
-    name.as_ref()
-  )
+fn sync_context_mirror(
+  project_path: &Path,
+  conn: &Connection,
+  project_id: &str,
+  markdown: &str,
+  updated_at: &str,
+) -> rusqlite::Result<()> {
+  let current_count: i64 = conn.query_row("SELECT COUNT(*) FROM current_context WHERE project_id=?1", params![project_id], |row| row.get(0))?;
+  if current_count == 0 {
+    conn.execute(
+      "INSERT INTO current_context (project_id, markdown, updated_at) VALUES (?1, ?2, ?3)",
+      params![project_id, markdown, updated_at],
+    )?;
+  } else {
+    conn.execute(
+      "UPDATE current_context SET markdown=?1, updated_at=?2 WHERE project_id=?3",
+      params![markdown, updated_at, project_id],
+    )?;
+  }
+
+  fs::write(project_path.join("context").join("CURRENT_CONTEXT.md"), markdown).map_err(|err| {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(err))
+  })?;
+  Ok(())
 }
 
 fn default_document_markdown(name: &str, document_type: &str) -> String {

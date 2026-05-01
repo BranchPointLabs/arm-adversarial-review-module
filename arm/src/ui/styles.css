@@ -384,7 +384,7 @@ button:disabled {
   background: rgba(255, 250, 242, 0.72);
   padding: 16px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
   overflow: hidden;
 }
@@ -403,6 +403,77 @@ button:disabled {
   align-content: start;
   gap: 10px;
   overflow: auto;
+}
+
+.unifiedSidebar {
+  gap: 10px;
+}
+
+.sidebarFeatureBar,
+.sidebarActionBar,
+.sidebarReviewBar {
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+}
+
+.unifiedStream {
+  padding-right: 4px;
+}
+
+.streamItem {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.streamItem-chat {
+  border-style: dashed;
+}
+
+.streamItem-note {
+  background: #fff7d8;
+  border-color: #d8c27b;
+}
+
+.streamItem-decision {
+  border-color: var(--ink);
+  background: #fffaf1;
+}
+
+.streamMeta {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.sidebarComposer {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.sidebarComposerInput {
+  width: 100%;
+  min-height: 110px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+  resize: vertical;
+  font-family: Consolas, "Courier New", monospace;
+  line-height: 1.45;
+}
+
+.sidebarComposerFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
 .inputCard {
@@ -424,46 +495,6 @@ button:disabled {
   margin-top: 4px;
   color: var(--muted);
   font-size: 12px;
-}
-
-.bottomPrompt {
-  grid-column: 2 / span 2;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-  border-top: 1px solid var(--line);
-  background: rgba(255, 251, 244, 0.95);
-  padding: 10px 12px;
-}
-
-.promptInput {
-  width: 100%;
-  min-width: 0;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: #fff;
-  padding: 10px 12px;
-}
-
-.modeBar {
-  grid-column: 1 / span 2;
-  display: flex;
-  gap: 8px;
-  overflow: hidden;
-}
-
-.modeButton {
-  border-color: var(--line);
-  background: transparent;
-  color: var(--ink);
-  padding: 7px 10px;
-}
-
-.modeButton.active {
-  border-color: var(--ink);
-  background: var(--ink);
-  color: #fff;
 }
 
 .submitButton {
@@ -568,6 +599,18 @@ button:disabled {
   min-height: 0;
   display: grid;
   gap: 12px;
+}
+
+.emptyContextState {
+  min-height: 280px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: rgba(255, 251, 244, 0.82);
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 10px;
+  padding: 24px;
 }
 
 .scrollPanel {
@@ -1079,9 +1122,6 @@ button.secondary {
     border-top: 1px solid var(--line);
   }
 
-  .bottomPrompt {
-    grid-column: 2;
-  }
 }
 
 @media (max-width: 900px) {
@@ -1113,17 +1153,13 @@ button.secondary {
     grid-row: 3;
   }
 
-  .bottomPrompt {
-    grid-column: 1;
-    grid-row: 4;
-  }
-
   .grid2 {
     grid-template-columns: 1fr;
   }
 
   .focusFrameHeader,
   .railHeader,
+  .sidebarComposerFooter,
   .referenceHeader,
   .referenceActions,
   .reviewCardActions {

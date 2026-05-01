@@ -1,4 +1,4 @@
-import { defaultContext, defaultDocumentMarkdown } from "./contextTemplate";
+import { defaultDocumentMarkdown } from "./contextTemplate";
 import {
   AgentCard,
   AgentCardStatus,
@@ -16,7 +16,7 @@ import {
 type BrowserProjectRecord = {
   project: Project;
   context: string;
-  documents?: ProjectDocument[];
+  documents: ProjectDocument[];
   notes: ChatNote[];
   decisions: Decision[];
   references: ProjectReference[];
@@ -54,8 +54,8 @@ export const browserProjectStore: ProjectStore = {
     };
     db.projects.push({
       project,
-      context: defaultContext(trimmed),
-      documents: [newDocument(project.id, "Initial Idea", "IDEA")],
+      context: "",
+      documents: [],
       notes: [],
       decisions: [],
       references: [],
@@ -78,9 +78,7 @@ export const browserProjectStore: ProjectStore = {
   async listDocuments(projectPath) {
     const db = readDb();
     const record = findRecord(db, projectPath);
-    ensureDocuments(record);
-    writeDb(db);
-    return [...(record.documents || [])].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return [...record.documents].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   },
   async createDocument(projectPath, name, type) {
     const trimmed = name.trim();
@@ -89,9 +87,9 @@ export const browserProjectStore: ProjectStore = {
 
     const db = readDb();
     const record = findRecord(db, projectPath);
-    ensureDocuments(record);
     const document = newDocument(record.project.id, trimmed, type);
-    record.documents!.unshift(document);
+    record.documents.unshift(document);
+    record.context = document.markdown;
     record.project.updatedAt = document.updatedAt;
     writeDb(db);
     return document;
@@ -99,19 +97,18 @@ export const browserProjectStore: ProjectStore = {
   async loadDocument(projectPath, documentId) {
     const db = readDb();
     const record = findRecord(db, projectPath);
-    ensureDocuments(record);
-    const document = record.documents!.find((item) => item.id === documentId);
+    const document = record.documents.find((item) => item.id === documentId);
     if (!document) throw new Error("Document not found.");
     return document;
   },
   async saveDocument(projectPath, documentId, markdown) {
     const db = readDb();
     const record = findRecord(db, projectPath);
-    ensureDocuments(record);
-    const document = record.documents!.find((item) => item.id === documentId);
+    const document = record.documents.find((item) => item.id === documentId);
     if (!document) throw new Error("Document not found.");
     document.markdown = ensureTrailingNewline(markdown);
     document.updatedAt = new Date().toISOString();
+    record.context = document.markdown;
     record.project.updatedAt = document.updatedAt;
     writeDb(db);
   },
@@ -263,21 +260,6 @@ function findRecord(db: BrowserDb, projectPath: string) {
   const record = db.projects.find((item) => item.project.path === projectPath);
   if (!record) throw new Error("Project not found.");
   return record;
-}
-
-function ensureDocuments(record: BrowserProjectRecord) {
-  if (Array.isArray(record.documents) && record.documents.length > 0) return;
-  record.documents = [
-    {
-      id: newId(),
-      projectId: record.project.id,
-      name: "Current Idea",
-      type: "IDEA",
-      markdown: record.context || defaultDocumentMarkdown("Current Idea", "IDEA"),
-      createdAt: record.project.createdAt,
-      updatedAt: record.project.updatedAt,
-    },
-  ];
 }
 
 function newDocument(projectId: string, name: string, type: DocumentType): ProjectDocument {

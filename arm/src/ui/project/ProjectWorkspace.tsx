@@ -56,7 +56,6 @@ export default function ProjectWorkspace() {
 
   const [navCollapsed, setNavCollapsed] = React.useState(false);
   const [documents, setDocuments] = React.useState<ProjectDocument[]>([]);
-  const [currentContext, setCurrentContext] = React.useState("");
   const [notes, setNotes] = React.useState<ChatNote[]>([]);
   const [decisions, setDecisions] = React.useState<Decision[]>([]);
   const [references, setReferences] = React.useState<ProjectReference[]>([]);
@@ -97,6 +96,7 @@ export default function ProjectWorkspace() {
   const route = parseRoute(location.pathname);
   const currentView = route.view;
   const routeDocumentId = route.documentId;
+  const activeContextMarkdown = activeDocument ? documentMarkdown : "";
   const stickyNotes = notes.filter(isStickyNote);
   const chatMessages = notes.filter((note) => !isStickyNote(note));
   const sidebarItems = buildSidebarItems(sidebarView, chatMessages, stickyNotes, decisions, cards);
@@ -108,19 +108,14 @@ export default function ProjectWorkspace() {
 
   React.useEffect(() => {
     if (!projectPath) return;
-    if (currentView === "document") {
-      const nextDocument =
-        documents.find((item) => item.id === routeDocumentId) || (documents.length > 0 ? documents[0] : null);
-      setActiveDocument(nextDocument);
-      setDocumentMarkdown(nextDocument?.markdown || "");
-      if (!nextDocument && documents.length > 0) {
-        navigate(`/p/${encodeURIComponent(projectPath)}/documents/${documents[0].id}`, { replace: true });
-      }
-    } else {
-      setActiveDocument(null);
-      setDocumentMarkdown("");
-    }
-  }, [currentView, documents, routeDocumentId, projectPath, navigate]);
+    const nextDocument =
+      documents.find((item) => item.id === routeDocumentId) ||
+      documents.find((item) => item.id === activeDocument?.id) ||
+      documents[0] ||
+      null;
+    setActiveDocument(nextDocument);
+    setDocumentMarkdown(nextDocument?.markdown || "");
+  }, [documents, routeDocumentId, projectPath]);
 
   if (!projectPath) {
     return <Navigate to="/" replace />;
@@ -129,9 +124,8 @@ export default function ProjectWorkspace() {
   async function refreshAll() {
     setBusy(true);
     try {
-      const [nextDocuments, nextContext, nextNotes, nextDecisions, nextReferences, nextCards] = await Promise.all([
+      const [nextDocuments, nextNotes, nextDecisions, nextReferences, nextCards] = await Promise.all([
         projectStore.listDocuments(projectPath),
-        projectStore.loadCurrentContext(projectPath),
         projectStore.listChatNotes(projectPath),
         projectStore.listDecisions(projectPath),
         projectStore.listReferences(projectPath),
@@ -139,7 +133,6 @@ export default function ProjectWorkspace() {
       ]);
 
       setDocuments(nextDocuments);
-      setCurrentContext(nextContext);
       setNotes(nextNotes);
       setDecisions(nextDecisions);
       setReferences(nextReferences);
@@ -147,19 +140,6 @@ export default function ProjectWorkspace() {
       setStatus(null);
     } catch (error: any) {
       setStatus(typeof error === "string" ? error : error?.message || "Failed to load project.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveCurrentContextNow() {
-    setBusy(true);
-    try {
-      await projectStore.saveCurrentContext(projectPath, currentContext);
-      setStatus("Current context saved.");
-      await refreshAll();
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Save failed.");
     } finally {
       setBusy(false);
     }
@@ -258,12 +238,16 @@ export default function ProjectWorkspace() {
   }
 
   async function buildCardsForPrompt(text: string) {
+    if (!activeDocument) {
+      throw new Error("Create and select a document before running a review.");
+    }
+
     const heuristicFallback = () =>
       buildReviewCards({
         prompt: text,
         mode: composerMode === "review" ? reviewMode : "chat",
         activeDocument,
-        currentContext,
+        currentContext: activeContextMarkdown,
         notes,
         decisions,
         references,
@@ -275,7 +259,7 @@ export default function ProjectWorkspace() {
           prompt: text,
           mode: "product",
           activeDocument,
-          currentContext,
+          currentContext: activeContextMarkdown,
           notes,
           decisions,
           references,
@@ -287,7 +271,7 @@ export default function ProjectWorkspace() {
           prompt: text,
           mode: "technical",
           activeDocument,
-          currentContext,
+          currentContext: activeContextMarkdown,
           notes,
           decisions,
           references,
@@ -299,7 +283,7 @@ export default function ProjectWorkspace() {
           prompt: text,
           mode: "product",
           activeDocument,
-          currentContext,
+          currentContext: activeContextMarkdown,
           notes,
           decisions,
           references,
@@ -308,7 +292,7 @@ export default function ProjectWorkspace() {
           prompt: text,
           mode: "technical",
           activeDocument,
-          currentContext,
+          currentContext: activeContextMarkdown,
           notes,
           decisions,
           references,
@@ -442,9 +426,13 @@ export default function ProjectWorkspace() {
   }
 
   function openContextDraft() {
+    if (!activeDocument) {
+      setErrorModalMessage("Create and select a document before updating context.");
+      return;
+    }
     const draft = buildContextDraft({
       projectName,
-      currentContext,
+      currentContext: activeContextMarkdown,
       decisions,
       cards,
       references,
@@ -454,10 +442,11 @@ export default function ProjectWorkspace() {
   }
 
   async function applyContextDraft() {
+    if (!activeDocument) return;
     setBusy(true);
     try {
-      await projectStore.saveCurrentContext(projectPath, draftMarkdown);
-      setCurrentContext(draftMarkdown);
+      await projectStore.saveDocument(projectPath, activeDocument.id, draftMarkdown);
+      setDocumentMarkdown(draftMarkdown);
       setDraftOpen(false);
       setStatus("Current context updated.");
       await refreshAll();
@@ -490,7 +479,7 @@ export default function ProjectWorkspace() {
               <div className="workspaceNavLabel">Project</div>
               <NavButton
                 active={currentView === "context"}
-                label="Current Context"
+                label="Context Document"
                 onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/context`)}
               />
               <NavButton
@@ -553,7 +542,15 @@ export default function ProjectWorkspace() {
           ))}
         </div>
         <div className="inputCardList unifiedStream">
-          {sidebarItems.map((item) => renderSidebarItem(item))}
+          {sidebarItems.map((item) => (
+            <SidebarItemView
+              key={item.id}
+              item={item}
+              onAccept={(card) => void setCardStatus(card, "accepted")}
+              onReject={(card) => void setCardStatus(card, "rejected")}
+              onEdit={openEditCard}
+            />
+          ))}
           {sidebarItems.length === 0 ? <div className="muted">No activity here yet.</div> : null}
         </div>
         <div className="sidebarComposer">
@@ -907,8 +904,12 @@ export default function ProjectWorkspace() {
 
     return (
       <FocusFrame
-        title="Current Context"
-        description="This is the living source of truth. The Update Context action replaces this document rather than appending to it."
+        title={activeDocument?.name || "No context document yet"}
+        description={
+          activeDocument
+            ? "The selected document is the context source of truth for review and update flows."
+            : "This project has no context yet. Create a document to establish the working truth."
+        }
         actions={
           <div className="row">
             <button type="button" className="secondary" onClick={() => setDecisionOpen(true)}>
@@ -917,18 +918,30 @@ export default function ProjectWorkspace() {
             <button type="button" className="secondary" onClick={openContextDraft}>
               Update Context
             </button>
-            <button type="button" className="primary" disabled={busy} onClick={() => void saveCurrentContextNow()}>
-              Save Context
+            <button type="button" className="primary" disabled={busy || !activeDocument} onClick={() => void saveDocumentNow()}>
+              Save Document
             </button>
           </div>
         }
       >
-        <textarea
-          className="documentEditor"
-          value={currentContext}
-          onChange={(event) => setCurrentContext(event.target.value)}
-          spellCheck={false}
-        />
+        {activeDocument ? (
+          <textarea
+            className="documentEditor"
+            value={documentMarkdown}
+            onChange={(event) => setDocumentMarkdown(event.target.value)}
+            spellCheck={false}
+          />
+        ) : (
+          <div className="emptyContextState">
+            <div className="surfaceTitle">No context document</div>
+            <div className="surfaceCopy">
+              Create a document first. That selected document becomes the source of truth for current queries.
+            </div>
+            <button type="button" className="primary" onClick={() => setAddDocumentOpen(true)}>
+              Add Document
+            </button>
+          </div>
+        )}
         {status ? <div className="workspaceStatus">{status}</div> : null}
       </FocusFrame>
     );
@@ -998,6 +1011,115 @@ function SummaryTile(props: { label: string; value: string }) {
   );
 }
 
+type SidebarItem =
+  | { kind: "chat"; id: string; createdAt: string; text: string }
+  | { kind: "note"; id: string; createdAt: string; text: string }
+  | { kind: "decision"; id: string; createdAt: string; text: string; reason: string | null }
+  | { kind: "card"; id: string; createdAt: string; card: AgentCard };
+
+function buildSidebarItems(
+  view: SidebarView,
+  chatMessages: ChatNote[],
+  stickyNotes: ChatNote[],
+  decisions: Decision[],
+  cards: AgentCard[],
+): SidebarItem[] {
+  const items: SidebarItem[] = [];
+
+  if (view === "activity" || view === "cards") {
+    items.push(...cards.map((card) => ({ kind: "card" as const, id: card.id, createdAt: card.createdAt, card })));
+  }
+  if (view === "activity") {
+    items.push(
+      ...chatMessages.map((note) => ({ kind: "chat" as const, id: note.id, createdAt: note.createdAt, text: note.text })),
+      ...stickyNotes.map((note) => ({ kind: "note" as const, id: note.id, createdAt: note.createdAt, text: note.text })),
+      ...decisions.map((decision) => ({
+        kind: "decision" as const,
+        id: decision.id,
+        createdAt: decision.createdAt,
+        text: decision.text,
+        reason: decision.reason,
+      })),
+    );
+  }
+  if (view === "notes") {
+    items.push(...stickyNotes.map((note) => ({ kind: "note" as const, id: note.id, createdAt: note.createdAt, text: note.text })));
+  }
+  if (view === "decisions") {
+    items.push(
+      ...decisions.map((decision) => ({
+        kind: "decision" as const,
+        id: decision.id,
+        createdAt: decision.createdAt,
+        text: decision.text,
+        reason: decision.reason,
+      })),
+    );
+  }
+
+  return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function SidebarItemView(props: {
+  item: SidebarItem;
+  onAccept: (card: AgentCard) => void;
+  onReject: (card: AgentCard) => void;
+  onEdit: (card: AgentCard) => void;
+}) {
+  const item = props.item;
+  if (item.kind === "chat") {
+    return (
+      <div className="streamItem streamItem-chat">
+        <div className="streamMeta">Chat · {formatTime(item.createdAt)}</div>
+        <div>{item.text}</div>
+      </div>
+    );
+  }
+
+  if (item.kind === "note") {
+    return (
+      <div className="streamItem streamItem-note">
+        <div className="streamMeta">Note · {formatTime(item.createdAt)}</div>
+        <div>{item.text}</div>
+      </div>
+    );
+  }
+
+  if (item.kind === "decision") {
+    return (
+      <div className="streamItem streamItem-decision">
+        <div className="streamMeta">Decision · {formatTime(item.createdAt)}</div>
+        <div className="reviewCardTitle">{item.text}</div>
+        {item.reason ? <div className="surfaceCopy">{item.reason}</div> : null}
+      </div>
+    );
+  }
+
+  const card = item.card;
+  return (
+    <div className={"reviewCard reviewCard-" + card.status}>
+      <div className="reviewCardHeader">
+        <span className="reviewCardType">{formatCardType(card.type)}</span>
+        <span className="reviewCardStatus">{card.status}</span>
+      </div>
+      <div className="reviewCardTitle">{card.title}</div>
+      <div className="reviewCardBody">{card.body}</div>
+      {card.proposedUpdate ? <div className="reviewCardUpdate">{card.proposedUpdate}</div> : null}
+      <div className="reviewCardActions">
+        <button type="button" className="secondary" onClick={() => props.onAccept(card)}>
+          Accept
+        </button>
+        <button type="button" className="secondary" onClick={() => props.onReject(card)}>
+          Reject
+        </button>
+        <button type="button" className="secondary" onClick={() => props.onEdit(card)}>
+          Edit
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function parseRoute(pathname: string): { view: ViewKey; documentId: string | null } {
   const parts = pathname.split("/").filter(Boolean);
   const view = parts[2];
@@ -1037,6 +1159,33 @@ function dedupeNewCards(cards: NewAgentCardInput[]) {
     seen.add(key);
     return true;
   });
+}
+
+function sidebarFeatureLabel(view: SidebarView) {
+  if (view === "activity") return "Activity";
+  if (view === "cards") return "Cards";
+  if (view === "notes") return "Notes";
+  return "Decisions";
+}
+
+function composerModeLabel(mode: ComposerMode) {
+  if (mode === "chat") return "Chat";
+  if (mode === "note") return "Note";
+  if (mode === "decision") return "Decision";
+  return "Review";
+}
+
+function composerPlaceholder(mode: ComposerMode, reviewMode: ReviewMode) {
+  if (mode === "chat") return "Capture a conversational thought...";
+  if (mode === "note") return "Write a sticky note...";
+  if (mode === "decision") return "State the decision...";
+  if (reviewMode === "product") return "Ask the CPO reviewer to pressure-test this...";
+  if (reviewMode === "technical") return "Ask the engineering reviewer to pressure-test this...";
+  return "Run both reviewers on this prompt...";
+}
+
+function isStickyNote(note: ChatNote) {
+  return Array.isArray(note.tags) && note.tags.includes("note");
 }
 
 async function safeReadText(file: File) {
