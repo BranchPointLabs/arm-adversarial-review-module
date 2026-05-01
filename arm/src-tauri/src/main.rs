@@ -861,14 +861,14 @@ fn validate_document_type(document_type: &str) -> Result<(), String> {
 
 fn validate_card_type(card_type: &str) -> Result<(), String> {
   match card_type {
-    "question" | "action" | "risk" | "decision_candidate" | "scope_cut" | "contradiction" => Ok(()),
+    "info" | "open_question" | "action" | "warning" => Ok(()),
     _ => Err("Card type is invalid.".into()),
   }
 }
 
 fn validate_card_status(status: &str) -> Result<(), String> {
   match status {
-    "pending" | "accepted" | "rejected" | "edited" => Ok(()),
+    "pending" | "accepted" | "rejected" | "edited" | "resolved" => Ok(()),
     _ => Err("Card status is invalid.".into()),
   }
 }

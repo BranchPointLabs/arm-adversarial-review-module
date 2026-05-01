@@ -1,7 +1,7 @@
 import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import { buildContextDraft, buildReviewCards, ReviewMode, summarizeReferenceText } from "../../core/armEngine";
-import { generateReviewCardsWithLlm } from "../../core/llmReview";
+import { buildContextDraft, buildReviewCards, summarizeReferenceText } from "../../core/armEngine";
+import { ChatPersonaMode, generateChatReplyWithLlm, generateDocumentUpdateWithLlm, generateReviewCardsWithLlm } from "../../core/llmReview";
 import {
   AgentCard,
   ChatNote,
@@ -15,15 +15,8 @@ import {
 import Modal from "../shared/Modal";
 
 type ViewKey = "context" | "notes" | "decisions" | "references" | "review" | "document";
-type SidebarView = "activity" | "cards" | "notes" | "decisions";
-type ComposerMode = "chat" | "note" | "decision" | "review";
-
-const modeLabels: Record<ReviewMode, string> = {
-  chat: "chat",
-  product: "product review",
-  technical: "technical review",
-  everything: "everything",
-};
+type ChatMode = "chat" | "product" | "technical" | "everything";
+type CardFilter = "info" | "open_question" | "warning" | "action";
 
 const acceptedReferenceTypes = [
   ".txt",
@@ -68,24 +61,27 @@ export default function ProjectWorkspace() {
   const [errorModalMessage, setErrorModalMessage] = React.useState<string | null>(null);
 
   const [prompt, setPrompt] = React.useState("");
-  const [reviewMode, setReviewMode] = React.useState<ReviewMode>("product");
-  const [sidebarView, setSidebarView] = React.useState<SidebarView>("activity");
-  const [composerMode, setComposerMode] = React.useState<ComposerMode>("chat");
+  const [chatMode, setChatMode] = React.useState<ChatMode>("chat");
+  const [cardFilter, setCardFilter] = React.useState<CardFilter>("info");
 
   const [addDocumentOpen, setAddDocumentOpen] = React.useState(false);
   const [newDocumentName, setNewDocumentName] = React.useState("");
   const [newDocumentType, setNewDocumentType] = React.useState<DocumentType>("IDEA");
   const [newDocumentStatus, setNewDocumentStatus] = React.useState<string | null>(null);
 
-  const [decisionOpen, setDecisionOpen] = React.useState(false);
-  const [decisionText, setDecisionText] = React.useState("");
-  const [decisionReason, setDecisionReason] = React.useState("");
-  const [decisionStatus, setDecisionStatus] = React.useState<string | null>(null);
+  const [updateOpen, setUpdateOpen] = React.useState(false);
+  const [updateText, setUpdateText] = React.useState("");
+  const [updateKind, setUpdateKind] = React.useState<"note" | "decision">("note");
+  const [updateStatus, setUpdateStatus] = React.useState<string | null>(null);
 
   const [editCard, setEditCard] = React.useState<AgentCard | null>(null);
   const [editCardTitle, setEditCardTitle] = React.useState("");
   const [editCardBody, setEditCardBody] = React.useState("");
   const [editCardUpdate, setEditCardUpdate] = React.useState("");
+  const [resolveCard, setResolveCard] = React.useState<AgentCard | null>(null);
+  const [resolveKind, setResolveKind] = React.useState<"note" | "decision">("note");
+  const [resolveText, setResolveText] = React.useState("");
+  const [resolveStatus, setResolveStatus] = React.useState<string | null>(null);
 
   const [draftOpen, setDraftOpen] = React.useState(false);
   const [draftMarkdown, setDraftMarkdown] = React.useState("");
@@ -98,8 +94,7 @@ export default function ProjectWorkspace() {
   const routeDocumentId = route.documentId;
   const activeContextMarkdown = activeDocument ? documentMarkdown : "";
   const stickyNotes = notes.filter(isStickyNote);
-  const chatMessages = notes.filter((note) => !isStickyNote(note));
-  const sidebarItems = buildSidebarItems(sidebarView, chatMessages, stickyNotes, decisions, cards);
+  const sidebarItems = buildSidebarItems(cards, cardFilter);
 
   React.useEffect(() => {
     if (!projectPath) return;
@@ -159,6 +154,16 @@ export default function ProjectWorkspace() {
     }
   }
 
+  async function copyDocumentNow() {
+    if (!activeDocument) return;
+    try {
+      await navigator.clipboard.writeText(documentMarkdown);
+      setStatus("Document copied.");
+    } catch (error: any) {
+      setErrorModalMessage(typeof error === "string" ? error : error?.message || "Copy failed.");
+    }
+  }
+
   async function createDocument() {
     const trimmed = newDocumentName.trim();
     if (trimmed.length < 2) {
@@ -182,24 +187,35 @@ export default function ProjectWorkspace() {
     }
   }
 
-  async function addDecision() {
-    const trimmed = decisionText.trim();
+  async function applyUpdate() {
+    const trimmed = updateText.trim();
     if (!trimmed) {
-      setDecisionStatus("Decision cannot be empty.");
+      setUpdateStatus("Update text cannot be empty.");
+      return;
+    }
+    if (!activeDocument) {
+      setUpdateStatus("Select a document before applying an update.");
       return;
     }
 
     setBusy(true);
     try {
-      await projectStore.addDecision(projectPath, trimmed, decisionReason.trim() || null);
-      setDecisionOpen(false);
-      setDecisionText("");
-      setDecisionReason("");
-      setDecisionStatus(null);
+      const nextMarkdown = await buildDocumentUpdate(trimmed, updateKind);
+      await projectStore.saveDocument(projectPath, activeDocument.id, nextMarkdown);
+      setDocumentMarkdown(nextMarkdown);
+      if (updateKind === "note") {
+        await projectStore.addChatNote(projectPath, trimmed, ["note"]);
+      } else {
+        await projectStore.addDecision(projectPath, trimmed, null);
+      }
+      setUpdateOpen(false);
+      setUpdateText("");
+      setUpdateKind("note");
+      setUpdateStatus(null);
       await refreshAll();
-      setStatus("Decision captured.");
+      setStatus(updateKind === "decision" ? "Decision applied." : "Note applied.");
     } catch (error: any) {
-      setDecisionStatus(typeof error === "string" ? error : error?.message || "Decision failed.");
+      setUpdateStatus(typeof error === "string" ? error : error?.message || "Update failed.");
     } finally {
       setBusy(false);
     }
@@ -211,21 +227,32 @@ export default function ProjectWorkspace() {
 
     setSubmitBusy(true);
     try {
-      if (composerMode === "chat") {
-        await projectStore.addChatNote(projectPath, text, ["chat"]);
-        setStatus("Chat saved.");
-      } else if (composerMode === "note") {
-        await projectStore.addChatNote(projectPath, text, ["note"]);
-        setStatus("Note saved.");
-      } else if (composerMode === "decision") {
-        await projectStore.addDecision(projectPath, text, decisionReason.trim() || null);
-        setDecisionReason("");
-        setStatus("Decision captured.");
+      await projectStore.addChatNote(projectPath, text, ["chat", "user", chatMode]);
+      if (chatMode === "chat") {
+        const reply = await generateChatReplyWithLlm({
+          prompt: text,
+          mode: "chat",
+          activeDocument,
+          currentContext: activeContextMarkdown,
+          notes,
+          decisions,
+          references,
+        });
+        await projectStore.createAgentCards(projectPath, "ARM Assistant", [
+          {
+            type: "info",
+            title: "Assistant response",
+            body: reply,
+            proposedUpdate: null,
+            targetSection: null,
+            sourceAgent: "ARM Assistant",
+          },
+        ]);
+        setStatus("Info card added.");
       } else {
-        const cardsToCreate = await buildCardsForPrompt(text);
-        await projectStore.createAgentCards(projectPath, labelForMode(reviewMode), cardsToCreate);
-        setStatus(cardsToCreate.length > 0 ? "Review cards added." : "No cards generated for that prompt.");
-        setSidebarView("cards");
+        const newCards = await buildCardsForPrompt(text);
+        await projectStore.createAgentCards(projectPath, sourceAgentLabel(chatMode), newCards);
+        setStatus(newCards.length > 1 ? "Cards added." : "Card added.");
       }
 
       setPrompt("");
@@ -238,82 +265,84 @@ export default function ProjectWorkspace() {
   }
 
   async function buildCardsForPrompt(text: string) {
-    if (!activeDocument) {
-      throw new Error("Create and select a document before running a review.");
-    }
-
-    const heuristicFallback = () =>
-      buildReviewCards({
-        prompt: text,
-        mode: composerMode === "review" ? reviewMode : "chat",
-        activeDocument,
-        currentContext: activeContextMarkdown,
-        notes,
-        decisions,
-        references,
-      });
+    const heuristicFallback = (mode: "product" | "technical" | "everything") =>
+      buildContextCardsFallback(text, mode);
 
     try {
-      if (reviewMode === "product") {
-        return await generateReviewCardsWithLlm({
-          prompt: text,
-          mode: "product",
-          activeDocument,
-          currentContext: activeContextMarkdown,
-          notes,
-          decisions,
-          references,
-        });
+      if (chatMode === "product") {
+        return await generateReviewCardsWithMode(text, "product");
       }
-
-      if (reviewMode === "technical") {
-        return await generateReviewCardsWithLlm({
-          prompt: text,
-          mode: "technical",
-          activeDocument,
-          currentContext: activeContextMarkdown,
-          notes,
-          decisions,
-          references,
-        });
+      if (chatMode === "technical") {
+        return await generateReviewCardsWithMode(text, "technical");
       }
-
-      const outcomes = await Promise.allSettled([
-        generateReviewCardsWithLlm({
-          prompt: text,
-          mode: "product",
-          activeDocument,
-          currentContext: activeContextMarkdown,
-          notes,
-          decisions,
-          references,
-        }),
-        generateReviewCardsWithLlm({
-          prompt: text,
-          mode: "technical",
-          activeDocument,
-          currentContext: activeContextMarkdown,
-          notes,
-          decisions,
-          references,
-        }),
+      const results = await Promise.allSettled([
+        generateReviewCardsWithMode(text, "product"),
+        generateReviewCardsWithMode(text, "technical"),
       ]);
-
-      const merged = outcomes
-        .filter((item): item is PromiseFulfilledResult<any> => item.status === "fulfilled")
+      const merged = results
+        .filter((item): item is PromiseFulfilledResult<NewAgentCardInput[]> => item.status === "fulfilled")
         .flatMap((item) => item.value);
-      if (merged.length > 0) {
-        return dedupeNewCards(merged).slice(0, 5);
-      }
-
-      const rejected = outcomes.find((item): item is PromiseRejectedResult => item.status === "rejected");
-      throw rejected?.reason || new Error("LLM review failed.");
+      if (merged.length > 0) return dedupeCards(merged).slice(0, 6);
+      throw new Error("LLM review failed.");
     } catch (error: any) {
-      setStatus(
-        `${typeof error === "string" ? error : error?.message || "LLM review failed."} Falling back to local review.`,
-      );
-      return heuristicFallback();
+      setStatus(`${typeof error === "string" ? error : error?.message || "LLM review failed."} Falling back to local review.`);
+      return heuristicFallback(chatMode === "everything" ? "everything" : (chatMode as "product" | "technical"));
     }
+  }
+
+  async function generateReviewCardsWithMode(text: string, mode: "product" | "technical") {
+    return generateReviewCardsWithLlm({
+      prompt: text,
+      mode,
+      activeDocument,
+      currentContext: activeContextMarkdown,
+      notes,
+      decisions,
+      references,
+    });
+  }
+
+  function buildContextCardsFallback(text: string, mode: "product" | "technical" | "everything") {
+    return buildReviewCards({
+      prompt: text,
+      mode,
+      activeDocument,
+      currentContext: activeContextMarkdown,
+      notes,
+      decisions,
+      references,
+    });
+  }
+
+  async function buildDocumentUpdate(text: string, kind: "note" | "decision") {
+    if (!activeDocument) {
+      throw new Error("Create and select a document before updating it.");
+    }
+
+    const baseInput = {
+      kind,
+      updateText: text,
+      activeDocument,
+      currentContext: activeContextMarkdown,
+      notes,
+      decisions,
+      references,
+    };
+
+    if (chatMode === "everything") {
+      const productPass = await generateDocumentUpdateWithLlm({ ...baseInput, mode: "product" });
+      return generateDocumentUpdateWithLlm({
+        ...baseInput,
+        mode: "technical",
+        currentContext: productPass,
+        activeDocument: { ...activeDocument, markdown: productPass },
+      });
+    }
+
+    return generateDocumentUpdateWithLlm({
+      ...baseInput,
+      mode: chatMode === "chat" ? "chat" : (chatMode as ChatPersonaMode),
+    });
   }
 
   async function setCardStatus(card: AgentCard, nextStatus: AgentCard["status"]) {
@@ -323,6 +352,48 @@ export default function ProjectWorkspace() {
       await refreshAll();
     } catch (error: any) {
       setStatus(typeof error === "string" ? error : error?.message || "Card update failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function openResolveCard(card: AgentCard) {
+    setResolveCard(card);
+    setResolveKind("note");
+    setResolveText(card.proposedUpdate || card.body);
+    setResolveStatus(null);
+  }
+
+  async function resolveCardNow() {
+    if (!resolveCard) return;
+    const trimmed = resolveText.trim();
+    if (!trimmed) {
+      setResolveStatus("Resolution text cannot be empty.");
+      return;
+    }
+    if (!activeDocument) {
+      setResolveStatus("Select a document before resolving a card.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const nextMarkdown = await buildDocumentUpdate(trimmed, resolveKind);
+      await projectStore.saveDocument(projectPath, activeDocument.id, nextMarkdown);
+      setDocumentMarkdown(nextMarkdown);
+      if (resolveKind === "decision") {
+        await projectStore.addDecision(projectPath, trimmed, null);
+      } else {
+        await projectStore.addChatNote(projectPath, trimmed, ["note"]);
+      }
+      await projectStore.updateAgentCard(projectPath, resolveCard.id, { status: "resolved" });
+      setResolveCard(null);
+      setResolveText("");
+      setResolveStatus(null);
+      await refreshAll();
+      setStatus("Card resolved.");
+    } catch (error: any) {
+      setResolveStatus(typeof error === "string" ? error : error?.message || "Resolve failed.");
     } finally {
       setBusy(false);
     }
@@ -462,6 +533,7 @@ export default function ProjectWorkspace() {
     <div className={"workspace armWorkspace" + (navCollapsed ? " navCollapsed" : "")}>
       <aside className="navPane workspaceSidebar" aria-label="Project navigation">
         <div className="projectLine">
+          {!navCollapsed ? <div className="projectNameLine">{projectName}</div> : null}
           <button
             type="button"
             className="iconButton"
@@ -470,18 +542,19 @@ export default function ProjectWorkspace() {
           >
             {navCollapsed ? ">" : "<"}
           </button>
-          {!navCollapsed ? <div className="projectNameLine">{projectName}</div> : null}
         </div>
 
         {!navCollapsed ? (
           <>
             <div className="workspaceNavBlock">
               <div className="workspaceNavLabel">Project</div>
-              <NavButton
-                active={currentView === "context"}
-                label="Context Document"
+              <button
+                type="button"
+                className={"workspaceNavItem workspaceProjectContextButton" + (currentView === "context" ? " active" : "")}
                 onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/context`)}
-              />
+              >
+                Context: {activeDocument?.name || "No document selected"}
+              </button>
               <NavButton
                 active={currentView === "references"}
                 label={`References (${references.length})`}
@@ -504,6 +577,38 @@ export default function ProjectWorkspace() {
                   </button>
                 ))}
               </div>
+              <div className="workspaceNavLabel">Decisions</div>
+              <div className="documentList" aria-label="Decisions">
+                {decisions.slice(0, 5).map((decision) => (
+                  <button
+                    key={decision.id}
+                    type="button"
+                    className={"documentNavItem decisionNavItem" + (currentView === "decisions" ? " active" : "")}
+                    onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/decisions`)}
+                    title={decision.text}
+                  >
+                    <span className="documentType">DEC</span>
+                    <span className="documentName">{decision.text}</span>
+                  </button>
+                ))}
+                {decisions.length === 0 ? <div className="documentNavEmpty">No decisions yet</div> : null}
+              </div>
+              <div className="workspaceNavLabel">Notes</div>
+              <div className="documentList" aria-label="Notes">
+                {stickyNotes.slice(0, 5).map((note) => (
+                  <button
+                    key={note.id}
+                    type="button"
+                    className={"documentNavItem noteNavItem" + (currentView === "notes" ? " active" : "")}
+                    onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/notes`)}
+                    title={note.text}
+                  >
+                    <span className="documentType">NOTE</span>
+                    <span className="documentName">{note.text}</span>
+                  </button>
+                ))}
+                {stickyNotes.length === 0 ? <div className="documentNavEmpty">No notes yet</div> : null}
+              </div>
             </div>
 
             <div className="documentNavFooter">
@@ -518,26 +623,15 @@ export default function ProjectWorkspace() {
       <section className="focusPane workspaceFocus">{renderCenterPane()}</section>
 
       <aside className="inputPane reviewRail unifiedSidebar" aria-label="Unified activity sidebar">
-        <div className="railHeader">
-          <div>
-            <div className="inputPaneTitle">Activity</div>
-            <div className="railMeta">
-              {cards.filter((card) => card.status === "accepted" || card.status === "edited").length} accepted cards
-            </div>
-          </div>
-          <button type="button" className="secondary" onClick={openContextDraft} disabled={busy}>
-            Update Context
-          </button>
-        </div>
         <div className="segmentedControl sidebarFeatureBar">
-          {(["activity", "cards", "notes", "decisions"] as SidebarView[]).map((view) => (
+          {(["info", "open_question", "warning", "action"] as CardFilter[]).map((filter) => (
             <button
-              key={view}
+              key={filter}
               type="button"
-              className={"segmentedPill" + (sidebarView === view ? " active" : "")}
-              onClick={() => setSidebarView(view)}
+              className={"segmentedPill" + (cardFilter === filter ? " active" : "")}
+              onClick={() => setCardFilter(filter)}
             >
-              {sidebarFeatureLabel(view)}
+              {cardFilterLabel(filter)}
             </button>
           ))}
         </div>
@@ -546,7 +640,7 @@ export default function ProjectWorkspace() {
             <SidebarItemView
               key={item.id}
               item={item}
-              onAccept={(card) => void setCardStatus(card, "accepted")}
+              onAccept={openResolveCard}
               onReject={(card) => void setCardStatus(card, "rejected")}
               onEdit={openEditCard}
             />
@@ -554,51 +648,28 @@ export default function ProjectWorkspace() {
           {sidebarItems.length === 0 ? <div className="muted">No activity here yet.</div> : null}
         </div>
         <div className="sidebarComposer">
-          <div className="segmentedControl sidebarActionBar">
-            {(["chat", "note", "decision", "review"] as ComposerMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={"segmentedPill" + (composerMode === mode ? " active" : "")}
-                onClick={() => setComposerMode(mode)}
-              >
-                {composerModeLabel(mode)}
-              </button>
-            ))}
-          </div>
-          {composerMode === "review" ? (
-            <div className="segmentedControl sidebarReviewBar">
-              {(["product", "technical", "everything"] as ReviewMode[]).filter((mode) => mode !== "chat").map((mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={"segmentedPill" + (reviewMode === mode ? " active" : "")}
-                  onClick={() => setReviewMode(mode)}
-                >
-                  {modeLabels[mode]}
-                </button>
-              ))}
-            </div>
-          ) : null}
           <textarea
             className="sidebarComposerInput"
             value={prompt}
-            placeholder={composerPlaceholder(composerMode, reviewMode)}
+            placeholder={composerPlaceholder(chatMode)}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !submitBusy) void submitPrompt();
             }}
           />
-          {composerMode === "decision" ? (
-            <input
-              className="textInput"
-              value={decisionReason}
-              placeholder="Reason (optional)"
-              onChange={(event) => setDecisionReason(event.target.value)}
-            />
-          ) : null}
+          <div className="segmentedControl sidebarActionBar">
+            {(["chat", "product", "technical", "everything"] as ChatMode[]).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                className={"segmentedPill" + (chatMode === mode ? " active" : "")}
+                onClick={() => setChatMode(mode)}
+              >
+                {chatModeLabel(mode)}
+              </button>
+            ))}
+          </div>
           <div className="sidebarComposerFooter">
-            <div className="railMeta">`Ctrl/Cmd + Enter` submits</div>
             <button
               type="button"
               className="primary submitButton"
@@ -671,35 +742,46 @@ export default function ProjectWorkspace() {
         </Modal>
       ) : null}
 
-      {decisionOpen ? (
+      {updateOpen ? (
         <Modal
-          title="Add Decision"
-          onClose={() => setDecisionOpen(false)}
+          title="Update"
+          onClose={() => setUpdateOpen(false)}
           footer={
             <>
-              <button type="button" className="secondary" onClick={() => setDecisionOpen(false)}>
+              <button type="button" className="secondary" onClick={() => setUpdateOpen(false)}>
                 Cancel
               </button>
-              <button type="button" className="primary" onClick={addDecision} disabled={busy}>
-                Save Decision
+              <button type="button" className="primary" onClick={() => void applyUpdate()} disabled={busy}>
+                Apply Update
               </button>
             </>
           }
         >
           <div className="stack">
+            <div className="segmentedControl sidebarActionBar">
+              {(["note", "decision"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={"segmentedPill" + (updateKind === kind ? " active" : "")}
+                  onClick={() => setUpdateKind(kind)}
+                >
+                  {kind === "note" ? "Note" : "Decision"}
+                </button>
+              ))}
+            </div>
             <textarea
               className="miniEditor"
-              value={decisionText}
-              placeholder="Decision"
-              onChange={(event) => setDecisionText(event.target.value)}
+              value={updateText}
+              placeholder={updateKind === "note" ? "What should be added or changed?" : "State the decision to apply."}
+              onChange={(event) => setUpdateText(event.target.value)}
             />
-            <textarea
-              className="miniEditor"
-              value={decisionReason}
-              placeholder="Reason (optional)"
-              onChange={(event) => setDecisionReason(event.target.value)}
-            />
-            {decisionStatus ? <div className="status">{decisionStatus}</div> : null}
+            <div className="surfaceCopy">
+              {updateKind === "decision"
+                ? "This will patch the active document and add the decision to the decision log."
+                : "This will patch the active document and store the note in project notes."}
+            </div>
+            {updateStatus ? <div className="status">{updateStatus}</div> : null}
           </div>
         </Modal>
       ) : null}
@@ -728,6 +810,45 @@ export default function ProjectWorkspace() {
               placeholder="Proposed update"
               onChange={(event) => setEditCardUpdate(event.target.value)}
             />
+          </div>
+        </Modal>
+      ) : null}
+
+      {resolveCard ? (
+        <Modal
+          title="Resolve Card"
+          onClose={() => setResolveCard(null)}
+          footer={
+            <>
+              <button type="button" className="secondary" onClick={() => setResolveCard(null)}>
+                Cancel
+              </button>
+              <button type="button" className="primary" onClick={() => void resolveCardNow()} disabled={busy}>
+                Resolve
+              </button>
+            </>
+          }
+        >
+          <div className="stack">
+            <div className="segmentedControl sidebarActionBar">
+              {(["note", "decision"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={"segmentedPill" + (resolveKind === kind ? " active" : "")}
+                  onClick={() => setResolveKind(kind)}
+                >
+                  {kind === "note" ? "Note" : "Decision"}
+                </button>
+              ))}
+            </div>
+            <textarea className="miniEditor" value={resolveText} onChange={(event) => setResolveText(event.target.value)} />
+            <div className="surfaceCopy">
+              {resolveKind === "decision"
+                ? "This will patch the active document, add a decision log entry, and mark the card as resolved."
+                : "This will patch the active document, store a note, and mark the card as resolved."}
+            </div>
+            {resolveStatus ? <div className="status">{resolveStatus}</div> : null}
           </div>
         </Modal>
       ) : null}
@@ -775,7 +896,7 @@ export default function ProjectWorkspace() {
         <FocusFrame
           title="Chat Notes"
           description="Messy thinking lives here. Notes do not become project truth until they are turned into decisions or accepted cards."
-          actions={<button type="button" className="secondary" onClick={() => setReviewMode("chat")}>Use chat mode</button>}
+          actions={<button type="button" className="secondary" onClick={() => setChatMode("chat")}>Use chat mode</button>}
         >
           <div className="scrollPanel stack">
             {notes.map((note) => (
@@ -795,7 +916,7 @@ export default function ProjectWorkspace() {
         <FocusFrame
           title="Decisions"
           description="Decisions are explicit project truth. They feed the next context rewrite."
-          actions={<button type="button" className="primary" onClick={() => setDecisionOpen(true)}>Add Decision</button>}
+          actions={<button type="button" className="primary" onClick={() => setUpdateOpen(true)}>Update</button>}
         >
           <div className="scrollPanel stack">
             {decisions.map((decision) => (
@@ -867,12 +988,11 @@ export default function ProjectWorkspace() {
       return (
         <FocusFrame
           title="Review Feed"
-          description="Reviews generate small cards. Accept the useful ones, reject the noise, then use Update Context to rewrite the brief."
-          actions={<button type="button" className="secondary" onClick={openContextDraft}>Update Context</button>}
+          description="Reviews generate small cards. Accept the useful ones, reject the noise, and keep the working document sharp."
         >
           <div className="reviewSummaryGrid">
             <SummaryTile label="Pending" value={String(cards.filter((card) => card.status === "pending").length)} />
-            <SummaryTile label="Accepted" value={String(cards.filter((card) => card.status === "accepted" || card.status === "edited").length)} />
+            <SummaryTile label="Resolved" value={String(cards.filter((card) => card.status === "resolved" || card.status === "accepted" || card.status === "edited").length)} />
             <SummaryTile label="References" value={String(references.filter((item) => item.isSelected).length)} />
             <SummaryTile label="Decisions" value={String(decisions.length)} />
           </div>
@@ -886,9 +1006,28 @@ export default function ProjectWorkspace() {
           title={activeDocument?.name || "Document"}
           description={activeDocument ? `${activeDocument.type} document` : "Select a document from the left column."}
           actions={
-            <button type="button" className="primary" disabled={!activeDocument || busy} onClick={() => void saveDocumentNow()}>
-              Save Document
-            </button>
+            <div className="row">
+              <button
+                type="button"
+                className="iconButton"
+                title="Copy document"
+                aria-label="Copy document"
+                disabled={!activeDocument}
+                onClick={() => void copyDocumentNow()}
+              >
+                <CopyIcon />
+              </button>
+              <button
+                type="button"
+                className="iconButton iconButton-primary"
+                title="Save document"
+                aria-label="Save document"
+                disabled={!activeDocument || busy}
+                onClick={() => void saveDocumentNow()}
+              >
+                <SaveIcon />
+              </button>
+            </div>
           }
         >
           <textarea
@@ -912,14 +1051,28 @@ export default function ProjectWorkspace() {
         }
         actions={
           <div className="row">
-            <button type="button" className="secondary" onClick={() => setDecisionOpen(true)}>
-              Add Decision
+            <button type="button" className="secondary" onClick={() => setUpdateOpen(true)}>
+              Update
             </button>
-            <button type="button" className="secondary" onClick={openContextDraft}>
-              Update Context
+            <button
+              type="button"
+              className="iconButton"
+              title="Copy document"
+              aria-label="Copy document"
+              disabled={!activeDocument}
+              onClick={() => void copyDocumentNow()}
+            >
+              <CopyIcon />
             </button>
-            <button type="button" className="primary" disabled={busy || !activeDocument} onClick={() => void saveDocumentNow()}>
-              Save Document
+            <button
+              type="button"
+              className="iconButton iconButton-primary"
+              title="Save document"
+              aria-label="Save document"
+              disabled={busy || !activeDocument}
+              onClick={() => void saveDocumentNow()}
+            >
+              <SaveIcon />
             </button>
           </div>
         }
@@ -1012,52 +1165,16 @@ function SummaryTile(props: { label: string; value: string }) {
 }
 
 type SidebarItem =
-  | { kind: "chat"; id: string; createdAt: string; text: string }
+  | { kind: "chat"; id: string; createdAt: string; text: string; tags: string[] | null }
   | { kind: "note"; id: string; createdAt: string; text: string }
   | { kind: "decision"; id: string; createdAt: string; text: string; reason: string | null }
   | { kind: "card"; id: string; createdAt: string; card: AgentCard };
 
-function buildSidebarItems(
-  view: SidebarView,
-  chatMessages: ChatNote[],
-  stickyNotes: ChatNote[],
-  decisions: Decision[],
-  cards: AgentCard[],
-): SidebarItem[] {
-  const items: SidebarItem[] = [];
-
-  if (view === "activity" || view === "cards") {
-    items.push(...cards.map((card) => ({ kind: "card" as const, id: card.id, createdAt: card.createdAt, card })));
-  }
-  if (view === "activity") {
-    items.push(
-      ...chatMessages.map((note) => ({ kind: "chat" as const, id: note.id, createdAt: note.createdAt, text: note.text })),
-      ...stickyNotes.map((note) => ({ kind: "note" as const, id: note.id, createdAt: note.createdAt, text: note.text })),
-      ...decisions.map((decision) => ({
-        kind: "decision" as const,
-        id: decision.id,
-        createdAt: decision.createdAt,
-        text: decision.text,
-        reason: decision.reason,
-      })),
-    );
-  }
-  if (view === "notes") {
-    items.push(...stickyNotes.map((note) => ({ kind: "note" as const, id: note.id, createdAt: note.createdAt, text: note.text })));
-  }
-  if (view === "decisions") {
-    items.push(
-      ...decisions.map((decision) => ({
-        kind: "decision" as const,
-        id: decision.id,
-        createdAt: decision.createdAt,
-        text: decision.text,
-        reason: decision.reason,
-      })),
-    );
-  }
-
-  return items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+function buildSidebarItems(cards: AgentCard[], cardFilter: CardFilter): SidebarItem[] {
+  return cards
+    .filter((card) => card.type === cardFilter)
+    .map((card) => ({ kind: "card" as const, id: card.id, createdAt: card.createdAt, card }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 function SidebarItemView(props: {
@@ -1070,7 +1187,7 @@ function SidebarItemView(props: {
   if (item.kind === "chat") {
     return (
       <div className="streamItem streamItem-chat">
-        <div className="streamMeta">Chat · {formatTime(item.createdAt)}</div>
+        <div className="streamMeta">{chatStreamLabel(item.tags)} | {formatTime(item.createdAt)}</div>
         <div>{item.text}</div>
       </div>
     );
@@ -1079,7 +1196,7 @@ function SidebarItemView(props: {
   if (item.kind === "note") {
     return (
       <div className="streamItem streamItem-note">
-        <div className="streamMeta">Note · {formatTime(item.createdAt)}</div>
+        <div className="streamMeta">Note | {formatTime(item.createdAt)}</div>
         <div>{item.text}</div>
       </div>
     );
@@ -1088,7 +1205,7 @@ function SidebarItemView(props: {
   if (item.kind === "decision") {
     return (
       <div className="streamItem streamItem-decision">
-        <div className="streamMeta">Decision · {formatTime(item.createdAt)}</div>
+        <div className="streamMeta">Decision | {formatTime(item.createdAt)}</div>
         <div className="reviewCardTitle">{item.text}</div>
         {item.reason ? <div className="surfaceCopy">{item.reason}</div> : null}
       </div>
@@ -1131,14 +1248,11 @@ function parseRoute(pathname: string): { view: ViewKey; documentId: string | nul
   return { view: "context", documentId: null };
 }
 
-function labelForMode(mode: ReviewMode) {
-  if (mode === "product") return "PM Agent";
-  if (mode === "technical") return "Engineer Agent";
-  if (mode === "everything") return "Critic Agent";
-  return "Chat";
-}
-
 function formatCardType(value: string) {
+  if (value === "info") return "info";
+  if (value === "open_question") return "open question";
+  if (value === "action") return "next step";
+  if (value === "warning") return "warning";
   return value.replace(/_/g, " ");
 }
 
@@ -1151,7 +1265,67 @@ function isReferenceFile(name: string) {
   return acceptedReferenceTypes.some((suffix) => lowered.endsWith(suffix));
 }
 
-function dedupeNewCards(cards: NewAgentCardInput[]) {
+function cardFilterLabel(filter: CardFilter) {
+  if (filter === "info") return "Info";
+  if (filter === "open_question") return "Question";
+  if (filter === "warning") return "Warning";
+  return "Next Steps";
+}
+
+function chatModeLabel(mode: ChatMode) {
+  if (mode === "chat") return "Chat";
+  if (mode === "product") return "Product";
+  if (mode === "technical") return "Technical";
+  return "Everything";
+}
+
+function composerPlaceholder(mode: ChatMode) {
+  if (mode === "chat") return "Ask ARM anything about this document...";
+  if (mode === "product") return "Ask the product persona to evaluate this...";
+  if (mode === "technical") return "Ask the technical persona to evaluate this...";
+  return "Send this to both product and technical personas...";
+}
+
+function isStickyNote(note: ChatNote) {
+  return Array.isArray(note.tags) && note.tags.includes("note");
+}
+
+function CopyIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <rect x="5" y="3" width="8" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M3.5 11.5V5.5C3.5 4.67 4.17 4 5 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SaveIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M3 2.5h8l2 2V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M5 2.5v4h5v-4" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <rect x="5" y="9" width="6" height="3" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function chatStreamLabel(tags: string[] | null) {
+  const safeTags = Array.isArray(tags) ? tags : [];
+  const role = safeTags.includes("assistant") ? "Assistant" : "You";
+  if (safeTags.includes("product")) return `${role} Product`;
+  if (safeTags.includes("technical")) return `${role} Technical`;
+  if (safeTags.includes("everything")) return `${role} Everything`;
+  return `${role} Chat`;
+}
+
+function sourceAgentLabel(mode: ChatMode) {
+  if (mode === "product") return "CPO Agent";
+  if (mode === "technical") return "Engineering Agent";
+  if (mode === "everything") return "Combined Review";
+  return "ARM Assistant";
+}
+
+function dedupeCards(cards: NewAgentCardInput[]) {
   const seen = new Set<string>();
   return cards.filter((card) => {
     const key = `${card.type}|${card.title}|${card.targetSection || ""}`;
@@ -1159,33 +1333,6 @@ function dedupeNewCards(cards: NewAgentCardInput[]) {
     seen.add(key);
     return true;
   });
-}
-
-function sidebarFeatureLabel(view: SidebarView) {
-  if (view === "activity") return "Activity";
-  if (view === "cards") return "Cards";
-  if (view === "notes") return "Notes";
-  return "Decisions";
-}
-
-function composerModeLabel(mode: ComposerMode) {
-  if (mode === "chat") return "Chat";
-  if (mode === "note") return "Note";
-  if (mode === "decision") return "Decision";
-  return "Review";
-}
-
-function composerPlaceholder(mode: ComposerMode, reviewMode: ReviewMode) {
-  if (mode === "chat") return "Capture a conversational thought...";
-  if (mode === "note") return "Write a sticky note...";
-  if (mode === "decision") return "State the decision...";
-  if (reviewMode === "product") return "Ask the CPO reviewer to pressure-test this...";
-  if (reviewMode === "technical") return "Ask the engineering reviewer to pressure-test this...";
-  return "Run both reviewers on this prompt...";
-}
-
-function isStickyNote(note: ChatNote) {
-  return Array.isArray(note.tags) && note.tags.includes("note");
 }
 
 async function safeReadText(file: File) {
@@ -1196,3 +1343,4 @@ async function safeReadText(file: File) {
     return null;
   }
 }
+

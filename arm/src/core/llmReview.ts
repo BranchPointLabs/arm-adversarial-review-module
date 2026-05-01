@@ -1,5 +1,5 @@
 import { getApiKey, loadLlmSettings } from "./llmSettings";
-import { personaForMode } from "./reviewPersonas";
+import { generalChatPersona, personaForMode } from "./reviewPersonas";
 import {
   AgentCardType,
   ChatNote,
@@ -10,6 +10,7 @@ import {
 } from "./projectStore";
 
 type ProviderReviewMode = "product" | "technical";
+export type ChatPersonaMode = "chat" | "product" | "technical";
 
 type ReviewRequest = {
   prompt: string;
@@ -36,7 +37,7 @@ const cardSchema = {
         properties: {
           type: {
             type: "string",
-            enum: ["question", "action", "risk", "decision_candidate", "scope_cut", "contradiction"],
+            enum: ["info", "open_question", "action", "warning"],
           },
           title: { type: "string" },
           body: { type: "string" },
@@ -65,6 +66,70 @@ export async function generateReviewCardsWithLlm(input: ReviewRequest): Promise<
   return callAnthropic(settings.modelByProvider.anthropic, apiKey, instruction, payload, sourceAgentForMode(input.mode));
 }
 
+export async function generateChatReplyWithLlm(input: {
+  prompt: string;
+  mode: ChatPersonaMode;
+  activeDocument: ProjectDocument | null;
+  currentContext: string;
+  notes: ChatNote[];
+  decisions: Decision[];
+  references: ProjectReference[];
+}) {
+  const settings = loadLlmSettings();
+  const apiKey = await getApiKey(settings.provider);
+  if (!apiKey) {
+    throw new Error(`No ${providerLabel(settings.provider)} API key saved.`);
+  }
+
+  const instructions =
+    input.mode === "chat"
+      ? generalChatPersona()
+      : personaForMode(input.mode === "product" ? "product" : "technical");
+
+  const payload = buildChatPayload(input);
+
+  if (settings.provider === "openai") {
+    return callOpenAiText(settings.modelByProvider.openai, apiKey, instructions, payload);
+  }
+
+  return callAnthropicText(settings.modelByProvider.anthropic, apiKey, instructions, payload);
+}
+
+export async function generateDocumentUpdateWithLlm(input: {
+  mode: ChatPersonaMode;
+  kind: "note" | "decision";
+  updateText: string;
+  activeDocument: ProjectDocument | null;
+  currentContext: string;
+  notes: ChatNote[];
+  decisions: Decision[];
+  references: ProjectReference[];
+}) {
+  const settings = loadLlmSettings();
+  const apiKey = await getApiKey(settings.provider);
+  if (!apiKey) {
+    throw new Error(`No ${providerLabel(settings.provider)} API key saved.`);
+  }
+
+  const instructions =
+    input.mode === "chat"
+      ? generalChatPersona()
+      : personaForMode(input.mode === "product" ? "product" : "technical");
+
+  const payload = buildDocumentUpdatePayload(input);
+
+  if (settings.provider === "openai") {
+    return callOpenAiText(settings.modelByProvider.openai, apiKey, buildDocumentUpdateInstruction(instructions), payload);
+  }
+
+  return callAnthropicText(
+    settings.modelByProvider.anthropic,
+    apiKey,
+    buildDocumentUpdateInstruction(instructions),
+    payload,
+  );
+}
+
 function buildInstruction(mode: ProviderReviewMode) {
   return [
     personaForMode(mode),
@@ -75,7 +140,52 @@ function buildInstruction(mode: ProviderReviewMode) {
     "Do not repeat the artifact back to the user.",
     "Do not produce summary prose outside the JSON schema.",
     "Use targetSection values that fit the living context document, such as 'What this project is', 'Current direction', 'Important decisions', 'Constraints', 'Open questions', or 'Risks'.",
+    "Only use these card types: info, open_question, action, warning.",
   ].join("\n");
+}
+
+function buildChatPayload(input: {
+  prompt: string;
+  mode: ChatPersonaMode;
+  activeDocument: ProjectDocument | null;
+  currentContext: string;
+  notes: ChatNote[];
+  decisions: Decision[];
+  references: ProjectReference[];
+}) {
+  return JSON.stringify(
+    {
+      mode: input.mode,
+      prompt: input.prompt,
+      activeDocument: input.activeDocument
+        ? {
+            name: input.activeDocument.name,
+            type: input.activeDocument.type,
+          }
+        : null,
+      currentContext: input.currentContext,
+      recentNotes: input.notes.slice(0, 8).map((note) => note.text),
+      recentDecisions: input.decisions.slice(0, 8).map((decision) => ({
+        text: decision.text,
+        reason: decision.reason,
+      })),
+      selectedReferences: input.references
+        .filter((reference) => reference.isSelected)
+        .slice(0, 6)
+        .map((reference) => ({
+          fileName: reference.fileName,
+          summary: reference.summary,
+        })),
+      responseRules: [
+        "Respond as a direct assistant reply to the user.",
+        "Be concise.",
+        "Use bullets only when they help.",
+        "If the user is asking for evaluation, include a recommendation and next steps.",
+      ],
+    },
+    null,
+    2,
+  );
 }
 
 function buildReviewPayload(input: ReviewRequest) {
@@ -103,6 +213,61 @@ function buildReviewPayload(input: ReviewRequest) {
           fileName: reference.fileName,
           summary: reference.summary,
           extractedText: (reference.extractedText || "").slice(0, 3000) || null,
+        })),
+    },
+    null,
+    2,
+  );
+}
+
+function buildDocumentUpdateInstruction(basePersona: string) {
+  return [
+    basePersona,
+    "",
+    "You are updating a project's active context document.",
+    "Return the full updated markdown document only.",
+    "Do not use code fences.",
+    "Preserve the existing structure when possible.",
+    "Apply the requested update cleanly and minimally.",
+    "If the update is a note, incorporate it as working context without overstating certainty.",
+    "If the update is a decision, reflect it as an explicit decision in the document.",
+  ].join("\n");
+}
+
+function buildDocumentUpdatePayload(input: {
+  mode: ChatPersonaMode;
+  kind: "note" | "decision";
+  updateText: string;
+  activeDocument: ProjectDocument | null;
+  currentContext: string;
+  notes: ChatNote[];
+  decisions: Decision[];
+  references: ProjectReference[];
+}) {
+  return JSON.stringify(
+    {
+      mode: input.mode,
+      updateKind: input.kind,
+      updateText: input.updateText,
+      activeDocument: input.activeDocument
+        ? {
+            name: input.activeDocument.name,
+            type: input.activeDocument.type,
+            markdown: input.activeDocument.markdown,
+          }
+        : null,
+      currentContext: input.currentContext,
+      recentNotes: input.notes.slice(0, 8).map((note) => note.text),
+      recentDecisions: input.decisions.slice(0, 8).map((decision) => ({
+        text: decision.text,
+        reason: decision.reason,
+      })),
+      selectedReferences: input.references
+        .filter((reference) => reference.isSelected)
+        .slice(0, 6)
+        .map((reference) => ({
+          fileName: reference.fileName,
+          summary: reference.summary,
         })),
     },
     null,
@@ -142,6 +307,29 @@ async function callOpenAi(model: string, apiKey: string, instructions: string, p
   return normalizeCards(JSON.parse(text).cards || [], sourceAgent);
 }
 
+async function callOpenAiText(model: string, apiKey: string, instructions: string, payload: string) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      instructions,
+      input: payload,
+      max_output_tokens: 1400,
+    }),
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result?.error?.message || "OpenAI request failed.");
+  }
+
+  return extractOpenAiText(result).trim();
+}
+
 async function callAnthropic(model: string, apiKey: string, instructions: string, payload: string, sourceAgent: string) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
@@ -171,6 +359,30 @@ async function callAnthropic(model: string, apiKey: string, instructions: string
 
   const text = extractAnthropicText(result);
   return normalizeCards(JSON.parse(text).cards || [], sourceAgent);
+}
+
+async function callAnthropicText(model: string, apiKey: string, instructions: string, payload: string) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 1400,
+      system: instructions,
+      messages: [{ role: "user", content: payload }],
+    }),
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result?.error?.message || "Anthropic request failed.");
+  }
+
+  return extractAnthropicText(result).trim();
 }
 
 function extractOpenAiText(result: any): string {
@@ -224,16 +436,17 @@ function normalizeCards(cards: any[], sourceAgent: string): NewAgentCardInput[] 
 function normalizeCardType(value: unknown): AgentCardType {
   const normalized = typeof value === "string" ? value.trim().toLowerCase() : "";
   if (
-    normalized === "question" ||
+    normalized === "info" ||
+    normalized === "open_question" ||
     normalized === "action" ||
-    normalized === "risk" ||
-    normalized === "decision_candidate" ||
-    normalized === "scope_cut" ||
-    normalized === "contradiction"
+    normalized === "warning"
   ) {
     return normalized as AgentCardType;
   }
-  return "question";
+  if (normalized === "question") return "open_question";
+  if (normalized === "risk" || normalized === "contradiction") return "warning";
+  if (normalized === "decision_candidate" || normalized === "scope_cut") return "action";
+  return "info";
 }
 
 function normalizeString(value: unknown) {

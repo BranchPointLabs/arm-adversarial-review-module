@@ -36,14 +36,12 @@ export type ProjectReference = {
 };
 
 export type AgentCardType =
-  | "question"
+  | "info"
+  | "open_question"
   | "action"
-  | "risk"
-  | "decision_candidate"
-  | "scope_cut"
-  | "contradiction";
+  | "warning";
 
-export type AgentCardStatus = "pending" | "accepted" | "rejected" | "edited";
+export type AgentCardStatus = "pending" | "accepted" | "rejected" | "edited" | "resolved";
 
 export type AgentCard = {
   id: string;
