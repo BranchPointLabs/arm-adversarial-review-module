@@ -1,0 +1,1137 @@
+:root {
+  --bg: #f2efe8;
+  --bg-accent: #e7dfd1;
+  --panel: #fffdfa;
+  --panel-strong: #f7f1e7;
+  --ink: #1d1b17;
+  --muted: #645c4f;
+  --line: #d7cebf;
+  --line-strong: #bda98a;
+  --shadow: 0 20px 60px rgba(31, 24, 14, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.7), transparent 28%),
+    linear-gradient(180deg, var(--bg-accent) 0%, var(--bg) 30%, #f7f3eb 100%);
+  color: var(--ink);
+  overflow: hidden;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.shell {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+
+.topbar {
+  border-bottom: 1px solid var(--line);
+  background: rgba(247, 241, 231, 0.88);
+  backdrop-filter: blur(10px);
+}
+
+.topbarInner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 18px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brandButton {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.brandButton:hover {
+  background: transparent;
+}
+
+.brandMark {
+  width: 42px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  background: var(--ink);
+  color: #fff;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.brandTitle {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.brandSub {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.appBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu {
+  position: relative;
+}
+
+.menuButton,
+.segmentedButton,
+button {
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  padding: 10px 12px;
+  cursor: pointer;
+}
+
+.menuButton {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink);
+  padding: 6px 10px;
+}
+
+.menuButton:hover,
+.menuButton.open {
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.menuPopover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 200px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 6px;
+  z-index: 40;
+}
+
+.menuItem {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  padding: 8px 10px;
+}
+
+.menuItem:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--panel-strong);
+}
+
+.menuItem:disabled,
+button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.workspace {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 340px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  overflow: hidden;
+}
+
+.armWorkspace.navCollapsed {
+  grid-template-columns: 56px minmax(420px, 1fr) 340px;
+}
+
+.documentWorkspace {
+  grid-template-columns: 248px minmax(420px, 1fr) 340px;
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.documentWorkspace.navCollapsed {
+  grid-template-columns: 56px minmax(420px, 1fr) 340px;
+}
+
+.navPane,
+.cardsPane {
+  min-height: 0;
+  padding: 16px;
+}
+
+.navPane {
+  border-right: 1px solid var(--line);
+  background: rgba(255, 251, 244, 0.56);
+  overflow: hidden;
+}
+
+.workspaceSidebar {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.focusPane {
+  min-width: 0;
+  min-height: 0;
+  padding: 20px;
+  overflow: hidden;
+}
+
+.workspaceFocus {
+  display: grid;
+}
+
+.cardsPane {
+  border-left: 1px solid var(--line);
+  background: rgba(255, 250, 242, 0.72);
+  overflow: auto;
+}
+
+.documentNav {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.projectLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.projectNameLine {
+  overflow: hidden;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspaceNavBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.workspaceNavFill {
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.workspaceNavLabel {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.workspaceNavItem {
+  width: 100%;
+  text-align: left;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  padding: 10px 12px;
+}
+
+.workspaceNavItem.active,
+.workspaceNavItem:hover {
+  border-color: var(--line-strong);
+  background: var(--panel);
+}
+
+.addDocumentButton {
+  width: 100%;
+}
+
+.documentList {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.documentNavFooter {
+  display: grid;
+  align-self: end;
+}
+
+.documentNavItem {
+  width: 100%;
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.documentNavItem.active,
+.documentNavItem:hover {
+  border-color: var(--line-strong);
+  background: var(--panel);
+}
+
+.documentType {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.documentName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.documentCenter {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
+.documentHeader {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.documentTitle {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.documentSubtitle {
+  margin-top: 2px;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.documentEditor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 14px;
+  resize: none;
+  font-family: Consolas, "Courier New", monospace;
+  line-height: 1.45;
+}
+
+.workspaceStatus {
+  min-height: 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.inputPane {
+  min-height: 0;
+  border-left: 1px solid var(--line);
+  background: rgba(255, 250, 242, 0.72);
+  padding: 16px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+}
+
+.inputPaneTitle {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.inputCardList {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+}
+
+.inputCard {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+  line-height: 1.35;
+}
+
+.railHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.railMeta {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.bottomPrompt {
+  grid-column: 2 / span 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 251, 244, 0.95);
+  padding: 10px 12px;
+}
+
+.promptInput {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+.modeBar {
+  grid-column: 1 / span 2;
+  display: flex;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.modeButton {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink);
+  padding: 7px 10px;
+}
+
+.modeButton.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.submitButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 118px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #fff;
+  border-radius: 999px;
+  animation: spin 0.8s linear infinite;
+}
+
+.settingsSection {
+  display: grid;
+  gap: 8px;
+}
+
+.settingsLabel {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.settingsMeta {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.segmentedControl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.segmentedPill {
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+
+.segmentedPill.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.focusHeader {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.focusTitle {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.focusDescription {
+  margin-top: 6px;
+  max-width: 60ch;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.focusBody {
+  min-height: 0;
+}
+
+.focusFrame {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+}
+
+.focusFrameHeader {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.focusActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.focusFrameBody {
+  min-height: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.scrollPanel {
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.composerBar {
+  grid-column: 2 / span 2;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 251, 244, 0.92);
+}
+
+.composerStatus {
+  grid-column: 1 / span 2;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.treeCard,
+.surfaceCard,
+.sideCard,
+.noticeCard {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.treeCard {
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.treeEyebrow,
+.treeSectionLabel,
+.heroEyebrow,
+.feedMeta,
+.surfaceMeta {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.treeTitle,
+.surfaceTitle,
+.sideCardTitle {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.treeMeta {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.treeSection {
+  margin-bottom: 16px;
+}
+
+.treeSectionLabel {
+  margin: 0 8px 8px 8px;
+  text-transform: uppercase;
+}
+
+.navItem {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.navItem:hover {
+  border-color: var(--line);
+  background: rgba(247, 241, 231, 0.85);
+  color: var(--ink);
+}
+
+.navItem.active {
+  border-color: var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.page {
+  display: grid;
+  gap: 16px;
+}
+
+.homeLayout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 16px;
+  min-height: 0;
+  align-items: stretch;
+}
+
+.recentProjectsPane {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.surfaceCopy,
+.surfaceCopy,
+.feedHint {
+  max-width: 62ch;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.recentProjectsList {
+  align-content: start;
+}
+
+.homeGuide {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.guideGrid {
+  display: grid;
+  gap: 10px;
+}
+
+.guideItem {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.guideLabel {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--ink);
+  color: #fff;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.homeNotice {
+  margin-top: 8px;
+}
+
+.surfaceCard {
+  padding: 16px;
+}
+
+.noticeCard {
+  padding: 16px;
+  border-style: dashed;
+  background: rgba(255, 251, 244, 0.9);
+}
+
+.contextSurface {
+  padding: 12px;
+}
+
+.surfaceTitle {
+  margin-bottom: 10px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.row.right {
+  justify-content: flex-end;
+}
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.stack,
+.list,
+.feed,
+.cardStubList {
+  display: grid;
+  gap: 10px;
+}
+
+.list.compact {
+  gap: 8px;
+}
+
+.listItem,
+.feedItem,
+.cardStub {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.listItem {
+  text-align: left;
+}
+
+.listItem:hover {
+  border-color: var(--line-strong);
+  background: #fffdfa;
+}
+
+.projectSummaryItem {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 12px;
+}
+
+.projectSummaryItem:hover {
+  border-color: var(--line-strong);
+  background: #fffdfa;
+}
+
+.reviewCard {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.reviewCard-accepted,
+.reviewCard-edited {
+  border-color: var(--line-strong);
+  background: #fffaf1;
+}
+
+.reviewCard-rejected {
+  opacity: 0.7;
+}
+
+.reviewCardHeader,
+.referenceHeader,
+.referenceActions,
+.reviewCardActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.reviewCardType,
+.reviewCardStatus,
+.summaryLabel {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.reviewCardTitle {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.reviewCardBody,
+.reviewCardUpdate {
+  line-height: 1.45;
+}
+
+.reviewCardUpdate {
+  color: var(--muted);
+}
+
+.referenceCard,
+.summaryTile {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.referenceToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.referenceDropZone {
+  border: 1px dashed var(--line-strong);
+  border-radius: 8px;
+  background: rgba(255, 251, 244, 0.8);
+  padding: 18px;
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
+.referenceDropZone.active {
+  background: #fff7ea;
+  border-color: var(--ink);
+}
+
+.reviewSummaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.summaryTile {
+  display: grid;
+  gap: 4px;
+}
+
+.summaryValue {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.listTitle {
+  font-family: "Segoe UI", sans-serif;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.listMeta,
+.muted,
+.status {
+  color: var(--muted);
+}
+
+.sideCard {
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.segmentedButton {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink);
+}
+
+.segmentedButton.active {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: #fff;
+}
+
+.cardStubType {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+input.textInput,
+.selectInput,
+textarea.editor,
+textarea.miniEditor {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px 12px;
+}
+
+textarea.editor,
+textarea.miniEditor {
+  font-family: Consolas, "Courier New", monospace;
+  resize: vertical;
+}
+
+textarea.editor {
+  min-height: 65vh;
+}
+
+textarea.miniEditor {
+  min-height: 120px;
+}
+
+.draftEditor {
+  min-height: 60vh;
+}
+
+button.secondary {
+  background: transparent;
+  color: var(--ink);
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(28, 24, 19, 0.2);
+  z-index: 100;
+}
+
+.modalCard {
+  width: min(560px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.modalHeader,
+.modalFooter {
+  padding: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.modalBody {
+  padding: 12px;
+}
+
+.modalFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  border-bottom: 0;
+  border-top: 1px solid var(--line);
+}
+
+.modalTitle {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.iconButton {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink);
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1100px) {
+  .workspace,
+  .documentWorkspace,
+  .armWorkspace,
+  .armWorkspace.navCollapsed {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .inputPane {
+    grid-column: 1 / span 2;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .bottomPrompt {
+    grid-column: 2;
+  }
+}
+
+@media (max-width: 900px) {
+  .topbarInner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .homeLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace,
+  .documentWorkspace,
+  .documentWorkspace.navCollapsed,
+  .armWorkspace,
+  .armWorkspace.navCollapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+  }
+
+  .navPane {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .inputPane {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .bottomPrompt {
+    grid-column: 1;
+    grid-row: 4;
+  }
+
+  .grid2 {
+    grid-template-columns: 1fr;
+  }
+
+  .focusFrameHeader,
+  .railHeader,
+  .referenceHeader,
+  .referenceActions,
+  .reviewCardActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .reviewSummaryGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}

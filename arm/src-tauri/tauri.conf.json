@@ -1,0 +1,22 @@
+{
+  "productName": "ARM",
+  "version": "0.0.1",
+  "identifier": "com.branchpointlabs.arm",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "ARM",
+        "width": 1120,
+        "height": 780,
+        "minWidth": 900,
+        "minHeight": 640
+      }
+    ]
+  }
+}
