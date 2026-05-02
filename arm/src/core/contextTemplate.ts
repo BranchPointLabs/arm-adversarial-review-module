@@ -29,7 +29,25 @@ export function defaultContext(name: string) {
   ].join("\n");
 }
 
-export function defaultDocumentMarkdown(name: string, type: "IDEA" | "PRD") {
+export function defaultDocumentMarkdown(name: string, type: "IDEA" | "PRD" | "PLAN") {
+  if (type === "PLAN") {
+    return [
+      `# ${name}`,
+      "",
+      "## Initiative 1",
+      "- Source: ",
+      "- Why: ",
+      "- Action: ",
+      "- Success Signal: ",
+      "",
+      "## Decision after execution",
+      "- [ ] Proceed",
+      "- [ ] Iterate",
+      "- [ ] Kill",
+      "",
+    ].join("\n");
+  }
+
   if (type === "PRD") {
     return [
       `# ${name}`,

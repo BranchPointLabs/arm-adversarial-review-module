@@ -684,7 +684,7 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD')),
+      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN')),
       markdown TEXT NOT NULL,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -726,6 +726,8 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     "#,
   )?;
 
+  migrate_documents_plan_type(conn)?;
+
   let has_selected = conn
     .prepare("SELECT is_selected FROM project_references LIMIT 1")
     .and_then(|mut stmt| stmt.exists([]))
@@ -736,6 +738,38 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
       [],
     );
   }
+
+  Ok(())
+}
+
+fn migrate_documents_plan_type(conn: &Connection) -> rusqlite::Result<()> {
+  let table_sql: String = conn.query_row(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='documents'",
+    [],
+    |row| row.get(0),
+  )?;
+
+  if table_sql.contains("'PLAN'") {
+    return Ok(());
+  }
+
+  conn.execute_batch(
+    r#"
+    ALTER TABLE documents RENAME TO documents_old;
+    CREATE TABLE documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN')),
+      markdown TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO documents (id, project_id, name, document_type, markdown, created_at, updated_at)
+      SELECT id, project_id, name, document_type, markdown, created_at, updated_at FROM documents_old;
+    DROP TABLE documents_old;
+    "#,
+  )?;
 
   Ok(())
 }
@@ -839,6 +873,13 @@ fn sync_context_mirror(
 }
 
 fn default_document_markdown(name: &str, document_type: &str) -> String {
+  if document_type == "PLAN" {
+    return ensure_trailing_newline(&format!(
+      "# {}\n\n## Initiative 1\n- Source: \n- Why: \n- Action: \n- Success Signal: \n\n## Decision after execution\n- [ ] Proceed\n- [ ] Iterate\n- [ ] Kill\n",
+      name
+    ));
+  }
+
   if document_type == "PRD" {
     return ensure_trailing_newline(&format!(
       "# {}\n\n## Problem\n- \n\n## Users\n- \n\n## Scope\n- \n\n## Requirements\n- \n\n## Risks\n- \n\n## Open Questions\n- \n",
@@ -853,10 +894,10 @@ fn default_document_markdown(name: &str, document_type: &str) -> String {
 }
 
 fn validate_document_type(document_type: &str) -> Result<(), String> {
-  if document_type == "IDEA" || document_type == "PRD" {
+  if document_type == "IDEA" || document_type == "PRD" || document_type == "PLAN" {
     return Ok(());
   }
-  Err("Document type must be IDEA or PRD.".into())
+  Err("Document type must be IDEA, PRD, or PLAN.".into())
 }
 
 fn validate_card_type(card_type: &str) -> Result<(), String> {

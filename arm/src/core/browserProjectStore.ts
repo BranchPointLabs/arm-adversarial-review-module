@@ -276,7 +276,7 @@ function newDocument(projectId: string, name: string, type: DocumentType): Proje
 }
 
 function assertDocumentType(type: string): asserts type is DocumentType {
-  if (type !== "IDEA" && type !== "PRD") throw new Error("Document type must be IDEA or PRD.");
+  if (type !== "IDEA" && type !== "PRD" && type !== "PLAN") throw new Error("Document type must be IDEA, PRD, or PLAN.");
 }
 
 function newId() {

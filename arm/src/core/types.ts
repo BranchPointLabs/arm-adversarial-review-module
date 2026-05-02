@@ -22,7 +22,7 @@ export type Decision = {
   createdAt: string;
 };
 
-export type DocumentType = "IDEA" | "PRD";
+export type DocumentType = "IDEA" | "PRD" | "PLAN";
 
 export type ProjectReference = {
   id: string;

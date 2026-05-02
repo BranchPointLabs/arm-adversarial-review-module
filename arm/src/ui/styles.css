@@ -650,15 +650,52 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.segmentedControl.planModeBar {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .segmentedControl.sidebarFeatureBar .segmentedPill,
 .segmentedControl.sidebarActionBar .segmentedPill,
-.segmentedControl.resolveActionBar .segmentedPill {
+.segmentedControl.resolveActionBar .segmentedPill,
+.segmentedControl.planModeBar .segmentedPill {
   min-width: 0;
   min-height: 30px;
   padding: 6px 4px;
   font-size: 12px;
   line-height: 1;
   white-space: nowrap;
+}
+
+.planSourceList {
+  max-height: 180px;
+  display: grid;
+  gap: 6px;
+  overflow: auto;
+}
+
+.planSourceItem {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 8px;
+}
+
+.planQuestion {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.planAnswerInput {
+  min-height: 74px;
 }
 
 .cardTypePill-info {
