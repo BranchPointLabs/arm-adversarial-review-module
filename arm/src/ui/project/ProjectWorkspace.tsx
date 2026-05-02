@@ -1,7 +1,13 @@
 import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { buildContextDraft, buildReviewCards, summarizeReferenceText } from "../../core/armEngine";
-import { ChatPersonaMode, generateChatReplyWithLlm, generateDocumentUpdateWithLlm, generateReviewCardsWithLlm } from "../../core/llmReview";
+import {
+  ChatPersonaMode,
+  generateChatCardsWithLlm,
+  generateChatReplyWithLlm,
+  generateDocumentUpdateWithLlm,
+  generateReviewCardsWithLlm,
+} from "../../core/llmReview";
 import {
   AgentCard,
   ChatNote,
@@ -228,10 +234,10 @@ export default function ProjectWorkspace() {
     try {
       await projectStore.addChatNote(projectPath, text, ["chat", "user", chatMode]);
       if (chatMode === "chat") {
-        const newCard = await generateChatInfoCard(text, chatMode);
-        await projectStore.createAgentCards(projectPath, newCard.sourceAgent || sourceAgentLabel(chatMode), [newCard]);
-        setStatus("Persona reply added.");
-        setCardFilter("info");
+        const newCards = await generateChatCards(text, chatMode);
+        await projectStore.createAgentCards(projectPath, sourceAgentLabel(chatMode), newCards);
+        setStatus(newCards.length > 1 ? "Chat cards added." : "Chat card added.");
+        setCardFilter(firstVisibleCardFilter(newCards));
       } else {
         const newCards = await buildCardsForPrompt(text);
         await projectStore.createAgentCards(projectPath, sourceAgentLabel(chatMode), newCards);
@@ -312,6 +318,23 @@ export default function ProjectWorkspace() {
       targetSection: null,
       sourceAgent: sourceAgentLabel(mode),
     };
+  }
+
+  async function generateChatCards(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput[]> {
+    try {
+      const cards = await generateChatCardsWithLlm({
+        prompt: text,
+        mode,
+        activeDocument,
+        currentContext: activeContextMarkdown,
+        notes,
+        decisions,
+        references,
+      });
+      return cards.slice(0, 3);
+    } catch {
+      return [await generateChatInfoCard(text, mode)];
+    }
   }
 
   function buildContextCardsFallback(text: string, mode: "product" | "technical" | "everything") {

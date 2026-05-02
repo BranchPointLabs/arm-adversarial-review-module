@@ -22,6 +22,8 @@ type ReviewRequest = {
   references: ProjectReference[];
 };
 
+type CardResponseSchema = typeof cardSchema | typeof chatCardSchema;
+
 const cardSchema = {
   type: "object",
   additionalProperties: false,
@@ -31,6 +33,34 @@ const cardSchema = {
       type: "array",
       minItems: 3,
       maxItems: 5,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["type", "title", "body", "proposedUpdate", "targetSection"],
+        properties: {
+          type: {
+            type: "string",
+            enum: ["info", "open_question", "action", "warning"],
+          },
+          title: { type: "string" },
+          body: { type: "string" },
+          proposedUpdate: { type: ["string", "null"] },
+          targetSection: { type: ["string", "null"] },
+        },
+      },
+    },
+  },
+} as const;
+
+const chatCardSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["cards"],
+  properties: {
+    cards: {
+      type: "array",
+      minItems: 1,
+      maxItems: 3,
       items: {
         type: "object",
         additionalProperties: false,
@@ -65,6 +95,32 @@ export async function generateReviewCardsWithLlm(input: ReviewRequest): Promise<
   }
 
   return callAnthropic(settings.modelByProvider.anthropic, apiKey, instruction, payload, sourceAgentForMode(input.mode));
+}
+
+export async function generateChatCardsWithLlm(input: {
+  prompt: string;
+  mode: ChatPersonaMode;
+  activeDocument: ProjectDocument | null;
+  currentContext: string;
+  notes: ChatNote[];
+  decisions: Decision[];
+  references: ProjectReference[];
+}): Promise<NewAgentCardInput[]> {
+  const settings = loadLlmSettings();
+  const apiKey = await getApiKey(settings.provider);
+  if (!apiKey) {
+    throw new Error(`No ${providerLabel(settings.provider)} API key saved.`);
+  }
+
+  const instruction = buildChatCardInstruction(input.mode);
+  const payload = buildChatPayload(input);
+  const sourceAgent = chatSourceAgentForMode(input.mode);
+
+  if (settings.provider === "openai") {
+    return callOpenAi(settings.modelByProvider.openai, apiKey, instruction, payload, sourceAgent, chatCardSchema);
+  }
+
+  return callAnthropic(settings.modelByProvider.anthropic, apiKey, instruction, payload, sourceAgent, chatCardSchema);
 }
 
 export async function generateChatReplyWithLlm(input: {
@@ -215,6 +271,25 @@ function buildChatInstruction(mode: ChatPersonaMode) {
   ].join("\n");
 }
 
+function buildChatCardInstruction(mode: ChatPersonaMode) {
+  const basePersona = mode === "chat" ? generalChatPersona() : personaForMode(mode);
+  return [
+    basePersona,
+    "",
+    "Return JSON only.",
+    "Output 1 to 3 cards.",
+    "Use only these card types: info, open_question, action, warning.",
+    "Use info for direct answers, conclusions, or useful context.",
+    "Use warning for risks, red flags, or reasons to pause.",
+    "Use open_question for unanswered questions the user should resolve.",
+    "Use action for concrete next steps.",
+    "Do not put the full response into one generic info card when the answer naturally contains warnings, questions, or next steps.",
+    "Each card should be useful by itself and grounded in the active document and prompt.",
+    "For a simple factual chat, one info card is enough.",
+    "For an evaluative chat, prefer 2 or 3 mixed cards.",
+  ].join("\n");
+}
+
 function buildReviewPayload(input: ReviewRequest) {
   return JSON.stringify(
     {
@@ -302,7 +377,14 @@ function buildDocumentUpdatePayload(input: {
   );
 }
 
-async function callOpenAi(model: string, apiKey: string, instructions: string, payload: string, sourceAgent: string) {
+async function callOpenAi(
+  model: string,
+  apiKey: string,
+  instructions: string,
+  payload: string,
+  sourceAgent: string,
+  schema: CardResponseSchema = cardSchema,
+) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -318,7 +400,7 @@ async function callOpenAi(model: string, apiKey: string, instructions: string, p
         format: {
           type: "json_schema",
           name: "arm_review_cards",
-          schema: cardSchema,
+          schema,
           strict: true,
         },
       },
@@ -357,7 +439,14 @@ async function callOpenAiText(model: string, apiKey: string, instructions: strin
   return extractOpenAiText(result).trim();
 }
 
-async function callAnthropic(model: string, apiKey: string, instructions: string, payload: string, sourceAgent: string) {
+async function callAnthropic(
+  model: string,
+  apiKey: string,
+  instructions: string,
+  payload: string,
+  sourceAgent: string,
+  schema: CardResponseSchema = cardSchema,
+) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -373,7 +462,7 @@ async function callAnthropic(model: string, apiKey: string, instructions: string
       output_config: {
         format: {
           type: "json_schema",
-          schema: cardSchema,
+          schema,
         },
       },
     }),
@@ -491,4 +580,10 @@ function providerLabel(provider: "openai" | "anthropic") {
 
 function sourceAgentForMode(mode: ProviderReviewMode) {
   return mode === "product" ? "CPO Agent" : "Engineering Agent";
+}
+
+function chatSourceAgentForMode(mode: ChatPersonaMode) {
+  if (mode === "chat") return "CEO Agent";
+  if (mode === "product") return "CPO Agent";
+  return "Engineering Agent";
 }
