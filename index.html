@@ -18,6 +18,8 @@
         --rule: #d8d1c7;
         --soft: #eee8de;
         --accent: #8f332d;
+        --yes: #2e7d32;
+        --no: #c62828;
       }
 
       * { box-sizing: border-box; }
@@ -116,7 +118,7 @@
         display: grid;
         grid-template-columns: minmax(0, 0.9fr) minmax(360px, 1.1fr);
         gap: 54px;
-       align-items: start;
+        align-items: start;
       }
       .hero-copy { max-width: 610px; }
       .eyebrow {
@@ -152,9 +154,7 @@
         font-size: clamp(19px, 2vw, 22px);
         line-height: 1.55;
       }
-      .hero-copy p:not(.eyebrow):not(.lead) {
-        font-size: 16px;
-      }
+      .hero-copy p:not(.eyebrow):not(.lead) { font-size: 16px; }
 
       .hero-actions {
         display: flex;
@@ -179,7 +179,7 @@
       .button:hover { text-decoration: none; transform: translateY(-1px); }
 
       .hero-visual {
-        margin-top: 64px;
+        margin: 64px 0 0;
         border: 1px solid var(--rule);
         border-radius: 14px;
         background: var(--surface);
@@ -238,10 +238,12 @@
       .comparison-table tr:last-child td { border-bottom: 0; }
       .comparison-table .mark {
         width: 110px;
-        font-size: 20px;
-        font-weight: 900;
+        font-size: 21px;
+        font-weight: 950;
         text-align: left;
       }
+      .comparison-table .mark.yes { color: var(--yes); }
+      .comparison-table .mark.no { color: var(--no); }
       .callout {
         margin: 22px 0 0;
         font-size: 18px;
@@ -267,80 +269,59 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         font-size: 14px;
       }
+
       .site-footer {
         margin-top: 64px;
-        padding: 24px 0;
-        border-top: 1px solid #e5e5e5;
+        padding: 20px 0;
+        border-top: 1px solid var(--rule);
         font-size: 14px;
-        color: #666;
+        color: var(--muted);
       }
-      
-      .site-footer a {
-        color: inherit;
-        text-decoration: underline;
+      .site-footer a { color: inherit; }
+      .footer-inner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
       }
-      .site-footer {
-  margin-top: 64px;
-  padding: 20px 0;
-  border-top: 1px solid #e5e5e5;
-  font-size: 14px;
-}
+      .footer-left {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 500;
+      }
+      .footer-center a,
+      .footer-right a {
+        margin-left: 16px;
+        text-decoration: none;
+        color: #444;
+      }
+      .footer-center a:hover,
+      .footer-right a:hover { text-decoration: underline; }
+      .footer-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
 
-.footer-inner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
-
-.footer-left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  font-weight: 500;
-}
-
-.footer-tagline {
-  color: #666;
-}
-
-.footer-center a,
-.footer-right a {
-  margin-left: 16px;
-  text-decoration: none;
-  color: #444;
-}
-
-.footer-center a:hover,
-.footer-right a:hover {
-  text-decoration: underline;
-}
-
-.footer-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  color: #666;
-}
-
-/* Mobile */
-@media (max-width: 800px) {
-  .footer-inner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .footer-center a {
-    margin-left: 0;
-    margin-right: 12px;
-  }
-}
       @media (max-width: 960px) {
         .hero-split { grid-template-columns: 1fr; }
         .hero-copy { max-width: none; }
+        .hero-visual { margin-top: 20px; }
         .site-nav { display: none; }
-        .hero { padding-top: 64px; }
+        .hero { padding-top: 48px; }
+      }
+
+      @media (max-width: 800px) {
+        .footer-inner {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 12px;
+        }
+        .footer-center a {
+          margin-left: 0;
+          margin-right: 12px;
+        }
       }
 
       @media (max-width: 620px) {
@@ -391,9 +372,7 @@
               candidates.
             </p>
 
-            <p>
-              You accept, reject, or edit each card. Nothing changes unless you approve it.
-            </p>
+            <p>You accept, reject, or edit each card. Nothing changes unless you approve it.</p>
 
             <div class="hero-actions" aria-label="Project links">
               <a class="button button-primary" href="https://github.com/BranchPointLabs/arm-adversarial-review-module">
@@ -452,68 +431,68 @@
               <tbody>
                 <tr>
                   <th scope="row">Generates large documents</th>
-                  <td class="mark" aria-label="Yes">✓</td>
-                  <td class="mark" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
                 </tr>
                 <tr>
                   <th scope="row">Produces small critique cards</th>
-                  <td class="mark" aria-label="No">✕</td>
-                  <td class="mark" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
                 </tr>
                 <tr>
                   <th scope="row">Depends on comprehensive documentation</th>
-                  <td class="mark" aria-label="Yes">✓</td>
-                  <td class="mark" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
                 </tr>
                 <tr>
                   <th scope="row">Works against your current document</th>
-                  <td class="mark" aria-label="No">✕</td>
-                  <td class="mark" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
                 </tr>
                 <tr>
                   <th scope="row">High output volume</th>
-                  <td class="mark" aria-label="Yes">✓</td>
-                  <td class="mark" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
                 </tr>
                 <tr>
                   <th scope="row">Fast to evaluate</th>
-                  <td class="mark" aria-label="No">✕</td>
-                  <td class="mark" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
                 </tr>
                 <tr>
                   <th scope="row">Can hide missed flows in polished text</th>
-                  <td class="mark" aria-label="Yes">✓</td>
-                  <td class="mark" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
                 </tr>
                 <tr>
                   <th scope="row">Can introduce subtle requirement drift</th>
-                  <td class="mark" aria-label="Yes">✓</td>
-                  <td class="mark" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
                 </tr>
                 <tr>
                   <th scope="row">Requires user-approved changes</th>
-                  <td class="mark" aria-label="No">✕</td>
-                  <td class="mark" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
                 </tr>
                 <tr>
                   <th scope="row">Tracks decisions, notes, and open questions</th>
-                  <td class="mark" aria-label="No">✕</td>
-                  <td class="mark" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
                 </tr>
                 <tr>
                   <th scope="row">Creates a reviewable audit trail</th>
-                  <td class="mark" aria-label="No">✕</td>
-                  <td class="mark" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
                 </tr>
                 <tr>
                   <th scope="row">Optimized for speed and output</th>
-                  <td class="mark" aria-label="Yes">✓</td>
-                  <td class="mark" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
                 </tr>
                 <tr>
                   <th scope="row">Optimized for direction and correctness</th>
-                  <td class="mark" aria-label="No">✕</td>
-                  <td class="mark" aria-label="Yes">✓</td>
+                  <td class="mark no" aria-label="No">✕</td>
+                  <td class="mark yes" aria-label="Yes">✓</td>
                 </tr>
               </tbody>
             </table>
@@ -554,33 +533,24 @@ npm install</code></pre>
         </div>
       </section>
     </main>
-   <footer class="site-footer">
-  <div class="wrap footer-inner">
 
-    <div class="footer-left">
-      <span class="brand-mark">ARM</span>
-      <span class="footer-tagline">Adversarial review for product documents</span>
-    </div>
+    <footer class="site-footer">
+      <div class="wrap footer-inner">
+        <div class="footer-left">
+          <span class="brand-mark">ARM</span>
+          <span class="footer-tagline">Adversarial review for product documents</span>
+        </div>
 
-    <div class="footer-center">
-      <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module">
-        Repository
-      </a>
-      <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module/blob/main/README.md">
-        Setup
-      </a>
-    </div>
+        <div class="footer-center">
+          <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module">Repository</a>
+          <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module/blob/main/README.md">Setup</a>
+        </div>
 
-    <div class="footer-right">
-      <span>Made in Canada · 2026</span>
-      <a href="https://github.com/CarltonBranch" target="_blank" rel="noopener">
-        @CarltonBranch
-      </a>
-    </div>
-
-  </div>
-</footer>
-  </body>
-</html>
+        <div class="footer-right">
+          <span>Made in Canada · 2026</span>
+          <a href="https://github.com/CarltonBranch" target="_blank" rel="noopener">@CarltonBranch</a>
+        </div>
+      </div>
+    </footer>
   </body>
 </html>
