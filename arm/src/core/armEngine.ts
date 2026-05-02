@@ -1,6 +1,4 @@
 import {
-  AgentCard,
-  AgentCardStatus,
   ChatNote,
   Decision,
   NewAgentCardInput,
@@ -88,70 +86,6 @@ export function buildReviewCards(input: ReviewInput): NewAgentCardInput[] {
   return dedupeCards(cards).slice(0, 5);
 }
 
-export function buildContextDraft(args: {
-  projectName: string;
-  currentContext: string;
-  decisions: Decision[];
-  cards: AgentCard[];
-  references: ProjectReference[];
-}) {
-  const acceptedCards = args.cards.filter((card) => card.status === "accepted" || card.status === "edited" || card.status === "resolved");
-  const selectedRefs = args.references.filter((item) => item.isSelected);
-
-  const decisionLines = args.decisions.slice(0, 6).map((item) => item.text);
-  const nextActionLines = acceptedCards
-    .filter((card) => card.type === "action")
-    .map((card) => card.proposedUpdate || card.body)
-    .slice(0, 6);
-  const riskLines = acceptedCards
-    .filter((card) => card.type === "warning")
-    .map((card) => card.proposedUpdate || card.body)
-    .slice(0, 6);
-  const questionLines = acceptedCards
-    .filter((card) => card.type === "open_question")
-    .map((card) => card.proposedUpdate || card.body)
-    .slice(0, 6);
-
-  const directionLines = collapseUnique([
-    ...decisionLines.slice(0, 3),
-    ...acceptedCards
-      .filter((card) => card.type === "action" || card.type === "info")
-      .map((card) => card.proposedUpdate || card.body)
-      .slice(0, 4),
-  ]);
-
-  const referenceLines = selectedRefs
-    .slice(0, 5)
-    .map((item) => `${item.fileName}: ${item.summary || summarizeReferenceText(item.extractedText || "")}`);
-
-  return ensureTrailingNewline(
-    [
-      "# Current Context",
-      "",
-      "## What this project is",
-      bulletList(directionLines.length ? directionLines : [args.projectName]),
-      "",
-      "## Current direction",
-      bulletList(directionLines.length ? directionLines : ["Clarify the current direction."]),
-      "",
-      "## Important decisions",
-      bulletList(decisionLines.length ? decisionLines : ["No explicit decisions recorded yet."]),
-      "",
-      "## Constraints",
-      bulletList(referenceLines.length ? referenceLines : ["No active reference constraints selected yet."]),
-      "",
-      "## Open questions",
-      bulletList(questionLines.length ? questionLines : ["None captured yet."]),
-      "",
-      "## Risks",
-      bulletList(riskLines.length ? riskLines : ["No material risks captured yet."]),
-      "",
-      "## Next actions",
-      bulletList(nextActionLines.length ? nextActionLines : ["Choose the next bounded action."]),
-    ].join("\n"),
-  );
-}
-
 function agentForMode(mode: ReviewMode) {
   if (mode === "product") return "PM Agent";
   if (mode === "technical") return "Engineer Agent";
@@ -192,25 +126,4 @@ function normalizeText(value: string) {
 
 function containsAny(value: string, needles: string[]) {
   return needles.some((needle) => value.includes(needle));
-}
-
-function collapseUnique(values: string[]) {
-  const seen = new Set<string>();
-  return values
-    .map((item) => normalizeText(item))
-    .filter(Boolean)
-    .filter((item) => {
-      const key = item.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
-function bulletList(items: string[]) {
-  return items.map((item) => `- ${item}`).join("\n");
-}
-
-function ensureTrailingNewline(value: string) {
-  return `${value.replace(/[\r\n]+$/g, "")}\n`;
 }

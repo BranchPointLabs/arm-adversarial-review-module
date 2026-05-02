@@ -250,7 +250,6 @@ fn create_document(project_path: String, name: String, document_type: String) ->
       params![id, project_id, trimmed, document_type, markdown, now, now],
     )
     .map_err(to_err)?;
-  sync_context_mirror(&project_path, &conn, &project_id, &markdown, &now).map_err(to_err)?;
   touch_project(&conn, &now).map_err(to_err)?;
 
   Ok(ProjectDocument {
@@ -284,43 +283,11 @@ fn save_document(project_path: String, document_id: String, markdown: String) ->
   let conn = open_project_conn(&project_path)?;
   let markdown = ensure_trailing_newline(&markdown);
   let now = Utc::now().to_rfc3339();
-  let project_id = get_project_id(&conn).map_err(to_err)?;
 
   conn
     .execute(
       "UPDATE documents SET markdown=?1, updated_at=?2 WHERE id=?3",
       params![markdown, now, document_id],
-    )
-    .map_err(to_err)?;
-  sync_context_mirror(&project_path, &conn, &project_id, &markdown, &now).map_err(to_err)?;
-  touch_project(&conn, &now).map_err(to_err)?;
-  Ok(())
-}
-
-#[command]
-fn load_current_context(project_path: String) -> Result<String, String> {
-  let project_path = PathBuf::from(project_path);
-  let file = project_path.join("context").join("CURRENT_CONTEXT.md");
-  match fs::read_to_string(file) {
-    Ok(value) => Ok(value),
-    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-    Err(error) => Err(to_err(error)),
-  }
-}
-
-#[command]
-fn save_current_context(project_path: String, markdown: String) -> Result<(), String> {
-  let project_path = PathBuf::from(project_path);
-  let conn = open_project_conn(&project_path)?;
-  let markdown = ensure_trailing_newline(&markdown);
-  let now = Utc::now().to_rfc3339();
-
-  let file = project_path.join("context").join("CURRENT_CONTEXT.md");
-  fs::write(file, &markdown).map_err(to_err)?;
-  conn
-    .execute(
-      "UPDATE current_context SET markdown=?1, updated_at=?2",
-      params![markdown, now],
     )
     .map_err(to_err)?;
   touch_project(&conn, &now).map_err(to_err)?;
@@ -718,11 +685,6 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
       source_agent TEXT,
       created_at TEXT NOT NULL
     );
-    CREATE TABLE IF NOT EXISTS current_context (
-      project_id TEXT PRIMARY KEY,
-      markdown TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
     "#,
   )?;
 
@@ -846,32 +808,6 @@ fn map_agent_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentCard> {
   })
 }
 
-fn sync_context_mirror(
-  project_path: &Path,
-  conn: &Connection,
-  project_id: &str,
-  markdown: &str,
-  updated_at: &str,
-) -> rusqlite::Result<()> {
-  let current_count: i64 = conn.query_row("SELECT COUNT(*) FROM current_context WHERE project_id=?1", params![project_id], |row| row.get(0))?;
-  if current_count == 0 {
-    conn.execute(
-      "INSERT INTO current_context (project_id, markdown, updated_at) VALUES (?1, ?2, ?3)",
-      params![project_id, markdown, updated_at],
-    )?;
-  } else {
-    conn.execute(
-      "UPDATE current_context SET markdown=?1, updated_at=?2 WHERE project_id=?3",
-      params![markdown, updated_at, project_id],
-    )?;
-  }
-
-  fs::write(project_path.join("context").join("CURRENT_CONTEXT.md"), markdown).map_err(|err| {
-    rusqlite::Error::ToSqlConversionFailure(Box::new(err))
-  })?;
-  Ok(())
-}
-
 fn default_document_markdown(name: &str, document_type: &str) -> String {
   if document_type == "PLAN" {
     return ensure_trailing_newline(&format!(
@@ -957,8 +893,6 @@ fn main() {
       create_document,
       load_document,
       save_document,
-      load_current_context,
-      save_current_context,
       add_chat_note,
       list_chat_notes,
       add_decision,

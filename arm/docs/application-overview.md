@@ -2,7 +2,7 @@
 
 ## What ARM is
 
-ARM is a local-first review tool for technical product work.
+ARM is a review tool for technical product work.
 
 Its core job is to help a user:
 

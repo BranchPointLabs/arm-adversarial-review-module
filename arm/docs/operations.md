@@ -27,7 +27,7 @@ Use this for:
 - layout iteration
 - basic UI smoke checks
 
-Do not use this mode to validate true local-first persistence behavior.
+Do not use this mode to validate true desktop persistence behavior.
 
 ## Launching the desktop app
 

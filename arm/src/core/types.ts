@@ -91,8 +91,6 @@ export type ProjectStore = {
   createDocument(projectPath: string, name: string, type: DocumentType): Promise<ProjectDocument>;
   loadDocument(projectPath: string, documentId: string): Promise<ProjectDocument>;
   saveDocument(projectPath: string, documentId: string, markdown: string): Promise<void>;
-  loadCurrentContext(projectPath: string): Promise<string>;
-  saveCurrentContext(projectPath: string, markdown: string): Promise<void>;
   addChatNote(projectPath: string, text: string, tags: string[] | null): Promise<ChatNote>;
   listChatNotes(projectPath: string): Promise<ChatNote[]>;
   addDecision(projectPath: string, text: string, reason: string | null): Promise<Decision>;

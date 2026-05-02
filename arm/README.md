@@ -1,6 +1,6 @@
 # ARM
 
-ARM is the `Adversarial Review Module`: a local-first desktop app for shaping project thinking into a living context document.
+ARM is the `Adversarial Review Module`: a desktop app for shaping project thinking into a living context document.
 
 ## What the app does
 
@@ -151,7 +151,7 @@ In desktop mode:
 - Rust handles persistence and local files
 - SQLite is used instead of `localStorage`
 
-If you want to test real local-first behavior, always use the Tauri window.
+If you want to test real desktop persistence behavior, always use the Tauri window.
 
 ## First-time setup
 

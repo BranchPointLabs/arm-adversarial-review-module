@@ -2,7 +2,7 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { Project, projectStore } from "../../core/projectStore";
 
-export default function ProjectHome() {
+export default function ProjectHome(props: { onCreateProject: () => void }) {
   const navigate = useNavigate();
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [status, setStatus] = React.useState<string | null>(null);
@@ -41,25 +41,41 @@ export default function ProjectHome() {
           </div>
         </section>
 
-        <section className="surfaceCard homeGuide">
-          <div className="surfaceTitle">Workspace</div>
-          <p className="surfaceCopy">
-            ARM keeps one living context document per project, then layers notes, decisions, references, and review
-            cards around it.
-          </p>
-          <div className="guideGrid">
-            <div className="guideItem">
-              <div className="guideLabel">1</div>
-              <div>Create or select a project from the app bar.</div>
-            </div>
-            <div className="guideItem">
-              <div className="guideLabel">2</div>
-              <div>Add notes, decisions, and references as you work.</div>
-            </div>
-            <div className="guideItem">
-              <div className="guideLabel">3</div>
-              <div>Run a review, accept the useful cards, then update context.</div>
-            </div>
+        <section className="surfaceCard homeGuide armLanding">
+          <div className="landingEyebrow">Adversarial Review Module</div>
+          <div className="landingHero">
+            <h1>Challenge the document. Keep control of the work.</h1>
+            <p>
+              ARM is a review workspace for product documents. Ask targeted questions about a PRD,
+              idea, or plan, then turn useful feedback into small cards, decisions, and controlled document updates.
+            </p>
+          </div>
+
+          <div className="landingGrid">
+            <section className="landingPanel">
+              <div className="landingPanelTitle">The Goal</div>
+              <p>
+                Help technical PMs and product leaders identify weak assumptions, hidden risks, and unclear decisions
+                without handing the whole artifact over to an AI writer.
+              </p>
+            </section>
+
+            <section className="landingPanel">
+              <div className="landingPanelTitle">How It Works</div>
+              <ol className="landingSteps">
+                <li>Ask a focused question.</li>
+                <li>Review concise cards.</li>
+                <li>Accept, dismiss, or resolve.</li>
+                <li>Evolve the selected document.</li>
+              </ol>
+            </section>
+          </div>
+
+          <div className="landingFooter">
+            <p>AI does not replace your document. It challenges it.</p>
+            <button type="button" className="primary landingCta" onClick={props.onCreateProject}>
+              Create Project
+            </button>
           </div>
           {status ? <div className="noticeCard homeNotice">{status}</div> : null}
         </section>

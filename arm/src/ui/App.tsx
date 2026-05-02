@@ -318,7 +318,7 @@ export default function App() {
       ) : null}
 
       <Routes>
-        <Route path="/" element={<ProjectHome />} />
+        <Route path="/" element={<ProjectHome onCreateProject={() => setCreateOpen(true)} />} />
         <Route path="/p/:projectPath/*" element={<ProjectWorkspace />} />
       </Routes>
     </div>

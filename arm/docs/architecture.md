@@ -145,7 +145,7 @@ This works, but it is the largest structural weakness on the backend side.
 ## Architectural strengths
 
 - clean runtime boundary through `projectStore`
-- real local-first persistence in desktop mode
+- real desktop persistence
 - typed document model is already present
 - LLM path and heuristic fallback are separate concerns
 - provider persona prompts are isolated from the transport logic

@@ -1,6 +1,6 @@
 # ARM - Adversarial Review Module
 
-ARM is a local-first review tool for technical product work. It helps a user keep one active project document sharp by surrounding it with chat, review cards, notes, decisions, and references.
+ARM is a review tool for technical product work. It helps a user keep one active project document sharp by surrounding it with chat, review cards, notes, decisions, and references.
 
 The core product idea is simple:
 
@@ -39,7 +39,7 @@ Around that document, ARM supports:
 - accepted notes
 - accepted decisions
 - attached references
-- local-first persistence
+- local persistence
 
 Current card types:
 
@@ -156,7 +156,7 @@ Browser preview behavior:
 
 ### 3. Desktop Application
 
-The desktop app is the real local-first application.
+The desktop app is the real application.
 
 From the repository root:
 

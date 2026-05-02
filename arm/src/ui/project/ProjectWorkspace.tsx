@@ -1,6 +1,6 @@
 import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import { buildContextDraft, buildReviewCards, summarizeReferenceText } from "../../core/armEngine";
+import { buildReviewCards, summarizeReferenceText } from "../../core/armEngine";
 import {
   ChatPersonaMode,
   generateChatCardsWithLlm,
@@ -8,6 +8,7 @@ import {
   generateDocumentUpdateWithLlm,
   generateReviewCardsWithLlm,
 } from "../../core/llmReview";
+import { buildPlanMarkdown, buildPlanQuestions, PlanMode, PlanQuestion, PlanStage } from "../../core/planning";
 import {
   AgentCard,
   ChatNote,
@@ -19,22 +20,12 @@ import {
   projectStore,
 } from "../../core/projectStore";
 import Modal from "../shared/Modal";
+import { buildSidebarItems, cardFilterLabel, CardFilter, countCards, SidebarItemView } from "./cardSidebar";
+import PlanModeModal from "./PlanModeModal";
 
-type ViewKey = "context" | "notes" | "decisions" | "references" | "review" | "document";
+type ViewKey = "context" | "notes" | "decisions" | "references" | "document";
 type ChatMode = "chat" | "product" | "technical" | "everything";
-type CardFilter = "info" | "open_question" | "warning" | "action";
 type ResolveKind = "patch" | "decision" | "open_question";
-type PlanMode = "focused" | "kill";
-type PlanStage = "setup" | "interrogation";
-type PlanQuestion = {
-  id: string;
-  question: string;
-  why: string;
-  impact: string;
-  source: string;
-  answer: string;
-  skipped: boolean;
-};
 
 const acceptedReferenceTypes = [
   ".txt",
@@ -99,8 +90,6 @@ export default function ProjectWorkspace() {
   const [resolveText, setResolveText] = React.useState("");
   const [resolveStatus, setResolveStatus] = React.useState<string | null>(null);
 
-  const [draftOpen, setDraftOpen] = React.useState(false);
-  const [draftMarkdown, setDraftMarkdown] = React.useState("");
   const [planOpen, setPlanOpen] = React.useState(false);
   const [planStage, setPlanStage] = React.useState<PlanStage>("setup");
   const [planSelectedDocIds, setPlanSelectedDocIds] = React.useState<string[]>([]);
@@ -611,39 +600,6 @@ export default function ProjectWorkspace() {
     }
   }
 
-  function openContextDraft() {
-    if (!activeDocument) {
-      setErrorModalMessage("Create and select a document before updating context.");
-      return;
-    }
-    const draft = buildContextDraft({
-      projectName,
-      currentContext: activeContextMarkdown,
-      decisions,
-      cards,
-      references,
-    });
-    setDraftMarkdown(draft);
-    setDraftOpen(true);
-  }
-
-  async function applyContextDraft() {
-    if (!activeDocument) return;
-    setBusy(true);
-    try {
-      await projectStore.saveDocument(projectPath, activeDocument.id, draftMarkdown);
-      setDocumentMarkdown(draftMarkdown);
-      setDraftOpen(false);
-      setStatus("Current context updated.");
-      await refreshAll();
-      navigate(`/p/${encodeURIComponent(projectPath)}/context`);
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Update context failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className={"workspace armWorkspace" + (navCollapsed ? " navCollapsed" : "")}>
       <aside className="navPane workspaceSidebar" aria-label="Project navigation">
@@ -936,121 +892,24 @@ export default function ProjectWorkspace() {
       ) : null}
 
       {planOpen ? (
-        <Modal
-          title="Plan Mode"
+        <PlanModeModal
+          busy={busy}
+          planStage={planStage}
+          selectedDocIds={planSelectedDocIds}
+          sourceDocuments={sourceDocuments}
+          planContext={planContext}
+          planMode={planMode}
+          planQuestions={planQuestions}
+          planStatus={planStatus}
           onClose={() => setPlanOpen(false)}
-          footer={
-            planStage === "setup" ? (
-              <>
-                <button type="button" className="secondary" onClick={() => setPlanOpen(false)}>
-                  Cancel
-                </button>
-                <button type="button" className="primary" onClick={startPlanningInterrogation} disabled={busy}>
-                  Start Planning
-                </button>
-              </>
-            ) : (
-              <>
-                <button type="button" className="secondary" onClick={() => setPlanStage("setup")}>
-                  Back
-                </button>
-                <button type="button" className="primary" onClick={() => void createPlanFromAnswers()} disabled={busy}>
-                  Continue
-                </button>
-              </>
-            )
-          }
-        >
-          {planStage === "setup" ? (
-            <div className="stack">
-              <div className="settingsSection">
-                <div className="settingsLabel">Source Selection</div>
-                <div className="surfaceCopy">{planSelectedDocIds.length} documents selected</div>
-                <div className="planSourceList">
-                  {sourceDocuments.map((document) => (
-                    <label key={document.id} className="planSourceItem">
-                      <input
-                        type="checkbox"
-                        checked={planSelectedDocIds.includes(document.id)}
-                        onChange={() => togglePlanSource(document.id)}
-                      />
-                      <span className="documentType">{document.type}</span>
-                      <span className="documentName">{document.name}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="settingsMeta">
-                  Planning uses accepted cards when available. If no accepted cards exist, ARM uses the selected full documents.
-                </div>
-              </div>
-
-              <div className="settingsSection">
-                <div className="settingsLabel">Context Injection</div>
-                <textarea
-                  className="miniEditor"
-                  value={planContext}
-                  placeholder={"Add constraints, goals, or context (optional)\n\nI have 3 days max\nThis is for a portfolio project\nBackend already exists"}
-                  onChange={(event) => setPlanContext(event.target.value)}
-                />
-              </div>
-
-              <div className="settingsSection">
-                <div className="settingsLabel">Mode</div>
-                <div className="segmentedControl planModeBar">
-                  {(["focused", "kill"] as const).map((mode) => (
-                    <button
-                      key={mode}
-                      type="button"
-                      className={"segmentedPill" + (planMode === mode ? " active" : "")}
-                      onClick={() => setPlanMode(mode)}
-                    >
-                      {mode === "focused" ? "Focused Plan" : "Kill Plan"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {planStatus ? <div className="status">{planStatus}</div> : null}
-            </div>
-          ) : (
-            <div className="stack">
-              <div className="surfaceTitle">We need clarification before planning</div>
-              {planQuestions.map((question, index) => (
-                <div key={question.id} className="planQuestion">
-                  <div className="reviewCardTitle">{index + 1}. {question.question}</div>
-                  <div className="surfaceCopy">Why it matters: {question.why}</div>
-                  <div className="surfaceCopy">Impact: {question.impact}</div>
-                  <div className="feedMeta">Source: {question.source}</div>
-                  <textarea
-                    className="miniEditor planAnswerInput"
-                    value={question.answer}
-                    disabled={question.skipped}
-                    placeholder="Answer inline..."
-                    onChange={(event) =>
-                      setPlanQuestions((current) =>
-                        current.map((item) => item.id === question.id ? { ...item, answer: event.target.value } : item),
-                      )
-                    }
-                  />
-                  <label className="sidebarCheckbox">
-                    <input
-                      type="checkbox"
-                      checked={question.skipped}
-                      onChange={(event) =>
-                        setPlanQuestions((current) =>
-                          current.map((item) =>
-                            item.id === question.id ? { ...item, skipped: event.target.checked, answer: event.target.checked ? "" : item.answer } : item,
-                          ),
-                        )
-                      }
-                    />
-                    <span>Skip (assume default)</span>
-                  </label>
-                </div>
-              ))}
-              {planStatus ? <div className="status">{planStatus}</div> : null}
-            </div>
-          )}
-        </Modal>
+          onBack={() => setPlanStage("setup")}
+          onStart={startPlanningInterrogation}
+          onContinue={() => void createPlanFromAnswers()}
+          onToggleSource={togglePlanSource}
+          onContextChange={setPlanContext}
+          onModeChange={setPlanMode}
+          onQuestionsChange={setPlanQuestions}
+        />
       ) : null}
 
       {resolveCard ? (
@@ -1086,27 +945,6 @@ export default function ProjectWorkspace() {
               {resolveKindDescription(resolveKind)}
             </div>
             {resolveStatus ? <div className="status">{resolveStatus}</div> : null}
-          </div>
-        </Modal>
-      ) : null}
-
-      {draftOpen ? (
-        <Modal
-          title="Update Context"
-          onClose={() => setDraftOpen(false)}
-          footer={
-            <>
-              <button type="button" className="secondary" onClick={() => setDraftOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="primary" onClick={() => void applyContextDraft()} disabled={busy}>
-                Replace Current Context
-              </button>
-            </>
-          }
-        >
-          <div className="stack">
-            <textarea className="editor draftEditor" value={draftMarkdown} onChange={(event) => setDraftMarkdown(event.target.value)} />
           </div>
         </Modal>
       ) : null}
@@ -1216,22 +1054,6 @@ export default function ProjectWorkspace() {
               </div>
             ))}
             {references.length === 0 ? <div className="muted">No references attached yet.</div> : null}
-          </div>
-        </FocusFrame>
-      );
-    }
-
-    if (currentView === "review") {
-      return (
-        <FocusFrame
-          title="Review Feed"
-          description="Reviews generate small cards. Accept the useful ones, reject the noise, and keep the working document sharp."
-        >
-          <div className="reviewSummaryGrid">
-            <SummaryTile label="Pending" value={String(cards.filter((card) => card.status === "pending").length)} />
-            <SummaryTile label="Resolved" value={String(cards.filter((card) => card.status === "resolved" || card.status === "accepted" || card.status === "edited").length)} />
-            <SummaryTile label="References" value={String(references.filter((item) => item.isSelected).length)} />
-            <SummaryTile label="Decisions" value={String(decisions.length)} />
           </div>
         </FocusFrame>
       );
@@ -1420,110 +1242,14 @@ function ReferenceDropZone(props: { onFiles: (files: FileList | null) => void; o
   );
 }
 
-function SummaryTile(props: { label: string; value: string }) {
-  return (
-    <div className="summaryTile">
-      <div className="summaryValue">{props.value}</div>
-      <div className="summaryLabel">{props.label}</div>
-    </div>
-  );
-}
-
-type SidebarItem =
-  | { kind: "chat"; id: string; createdAt: string; text: string; tags: string[] | null }
-  | { kind: "note"; id: string; createdAt: string; text: string }
-  | { kind: "decision"; id: string; createdAt: string; text: string; reason: string | null }
-  | { kind: "card"; id: string; createdAt: string; card: AgentCard };
-
-function buildSidebarItems(
-  cards: AgentCard[],
-  cardFilter: CardFilter,
-  showAllCards: boolean,
-  showDismissedCards: boolean,
-): SidebarItem[] {
-  return cards
-    .filter((card) => (showAllCards || card.type === cardFilter) && (showDismissedCards || card.status !== "rejected"))
-    .map((card) => ({ kind: "card" as const, id: card.id, createdAt: card.createdAt, card }))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
-function countCards(cards: AgentCard[], cardFilter: CardFilter, showDismissedCards: boolean) {
-  return cards.filter((card) => card.type === cardFilter && (showDismissedCards || card.status !== "rejected")).length;
-}
-
-function SidebarItemView(props: {
-  item: SidebarItem;
-  onAccept: (card: AgentCard) => void;
-  onDismiss: (card: AgentCard) => void;
-}) {
-  const item = props.item;
-  if (item.kind === "chat") {
-    return (
-      <div className="streamItem streamItem-chat">
-        <div className="streamMeta">{chatStreamLabel(item.tags)} | {formatTime(item.createdAt)}</div>
-        <div>{item.text}</div>
-      </div>
-    );
-  }
-
-  if (item.kind === "note") {
-    return (
-      <div className="streamItem streamItem-note">
-        <div className="streamMeta">Note | {formatTime(item.createdAt)}</div>
-        <div>{item.text}</div>
-      </div>
-    );
-  }
-
-  if (item.kind === "decision") {
-    return (
-      <div className="streamItem streamItem-decision">
-        <div className="streamMeta">Decision | {formatTime(item.createdAt)}</div>
-        <div className="reviewCardTitle">{item.text}</div>
-        {item.reason ? <div className="surfaceCopy">{item.reason}</div> : null}
-      </div>
-    );
-  }
-
-  const card = item.card;
-  return (
-    <div className={"reviewCard reviewCard-" + card.status}>
-      <div className="reviewCardHeader">
-        <span className={"reviewCardType cardTypeBadge cardTypeBadge-" + card.type}>{formatCardType(card.type)}</span>
-        <span className="reviewCardStatus">{card.status}</span>
-      </div>
-      <div className="reviewCardTitle">{card.title}</div>
-      <div className="reviewCardBody">{card.body}</div>
-      {card.proposedUpdate ? <div className="reviewCardUpdate">{card.proposedUpdate}</div> : null}
-      <div className="reviewCardActions">
-        <button type="button" className="secondary" onClick={() => props.onAccept(card)}>
-          Accept
-        </button>
-        <button type="button" className="secondary" onClick={() => props.onDismiss(card)}>
-          Dismiss
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function parseRoute(pathname: string): { view: ViewKey; documentId: string | null } {
   const parts = pathname.split("/").filter(Boolean);
   const view = parts[2];
   if (view === "notes") return { view: "notes", documentId: null };
   if (view === "decisions") return { view: "decisions", documentId: null };
   if (view === "references") return { view: "references", documentId: null };
-  if (view === "review") return { view: "review", documentId: null };
   if (view === "documents") return { view: "document", documentId: parts[3] || null };
   return { view: "context", documentId: null };
-}
-
-function formatCardType(value: string) {
-  if (value === "info") return "info";
-  if (value === "open_question") return "open question";
-  if (value === "action") return "next step";
-  if (value === "warning") return "warning";
-  return value.replace(/_/g, " ");
 }
 
 function formatTime(value: string) {
@@ -1533,13 +1259,6 @@ function formatTime(value: string) {
 function isReferenceFile(name: string) {
   const lowered = name.toLowerCase();
   return acceptedReferenceTypes.some((suffix) => lowered.endsWith(suffix));
-}
-
-function cardFilterLabel(filter: CardFilter) {
-  if (filter === "info") return "Info";
-  if (filter === "open_question") return "Question";
-  if (filter === "warning") return "Warning";
-  return "Next Steps";
 }
 
 function chatModeLabel(mode: ChatMode) {
@@ -1600,133 +1319,6 @@ function appendListItemToSection(markdown: string, sectionTitle: string, text: s
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function buildPlanQuestions(
-  documents: ProjectDocument[],
-  acceptedCards: AgentCard[],
-  context: string,
-  mode: PlanMode,
-): PlanQuestion[] {
-  const primaryDocument = documents[0];
-  const cardSource = acceptedCards[0];
-  const contextProvided = context.trim().length > 0;
-  const questions: PlanQuestion[] = [
-    {
-      id: "outcome",
-      question: mode === "kill" ? "What evidence would prove this is not worth building?" : "What outcome must this plan change first?",
-      why: cardSource
-        ? `Linked to critique: ${cardSource.title}`
-        : "The plan needs a decision target, not just a list of work.",
-      impact: "Without this, initiatives can become generic work items instead of decision-driving steps.",
-      source: cardSource ? `${cardSource.sourceAgent}: ${cardSource.title}` : primaryDocument?.name || "Selected documents",
-      answer: "",
-      skipped: false,
-    },
-    {
-      id: "constraint",
-      question: contextProvided ? "Which injected constraint is non-negotiable?" : "What constraint should ARM assume if none is provided?",
-      why: "Constraints make the plan specific to this situation.",
-      impact: "Without a constraint, the plan may recommend work that is too large, too slow, or irrelevant.",
-      source: contextProvided ? "User context" : primaryDocument?.name || "Selected documents",
-      answer: "",
-      skipped: false,
-    },
-    {
-      id: "signal",
-      question: "What signal should decide Proceed, Iterate, or Kill after execution?",
-      why: "ARM needs a decision gate so the plan does not become open-ended activity.",
-      impact: "Without a signal, the plan can be completed without changing the decision.",
-      source: acceptedCards.length > 0 ? "Accepted cards" : "Selected documents",
-      answer: "",
-      skipped: false,
-    },
-  ];
-
-  return questions;
-}
-
-function buildPlanMarkdown(args: {
-  title: string;
-  mode: PlanMode;
-  documents: ProjectDocument[];
-  cards: AgentCard[];
-  context: string;
-  questions: PlanQuestion[];
-}) {
-  const sourceCards = args.cards.length > 0 ? args.cards : [];
-  const answered = args.questions.map((question) => ({
-    ...question,
-    finalAnswer: question.skipped ? defaultAnswerForQuestion(question.id, args.mode) : question.answer.trim(),
-  }));
-  const initiativeSeeds = sourceCards.length > 0
-    ? sourceCards.slice(0, 3).map((card) => ({
-        source: `${card.sourceAgent}: ${card.title}`,
-        why: card.body,
-        action: card.proposedUpdate || card.body,
-      }))
-    : args.documents.slice(0, 3).map((document) => ({
-        source: `${document.type}: ${document.name}`,
-        why: firstMeaningfulLine(document.markdown) || "Selected as a planning source.",
-        action: args.mode === "kill" ? "Run the smallest test that could disprove this direction." : "Turn the strongest source signal into one bounded next step.",
-      }));
-
-  const initiatives = initiativeSeeds.slice(0, 3).map((seed, index) => {
-    const constraint = answered.find((question) => question.id === "constraint")?.finalAnswer || "Keep scope small.";
-    const signal = answered.find((question) => question.id === "signal")?.finalAnswer || "Use the result to decide proceed, iterate, or kill.";
-    const action = args.mode === "kill"
-      ? `Try to invalidate this direction: ${seed.action}`
-      : seed.action;
-    return [
-      `## Initiative ${index + 1}`,
-      `Source: ${seed.source}`,
-      `Why: ${trimSentence(seed.why)}`,
-      `Action: ${trimSentence(action)} Constraint: ${trimSentence(constraint)}`,
-      `Success Signal: ${trimSentence(signal)}`,
-      "",
-    ].join("\n");
-  });
-
-  return ensureTrailingNewline([
-    `# ${args.title}`,
-    "",
-    `Mode: ${args.mode === "kill" ? "Kill Plan" : "Focused Plan"}`,
-    "",
-    "## Planning Context",
-    args.context.trim() || "- No additional context supplied.",
-    "",
-    "## Clarifications",
-    ...answered.map((question) => `- ${question.question} ${question.finalAnswer}`),
-    "",
-    ...initiatives,
-    "## Decision after execution",
-    "- [ ] Proceed",
-    "- [ ] Iterate",
-    "- [ ] Kill",
-    "",
-  ].join("\n"));
-}
-
-function defaultAnswerForQuestion(id: string, mode: PlanMode) {
-  if (id === "outcome") return mode === "kill" ? "Assume the goal is to find the cheapest invalidating signal." : "Assume the goal is to reduce the largest planning risk.";
-  if (id === "constraint") return "Assume the plan must be small, local, and executable without new infrastructure.";
-  return "Assume the decision gate is based on observable user or implementation signal.";
-}
-
-function firstMeaningfulLine(markdown: string) {
-  return markdown
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line && !line.startsWith("#") && line !== "-");
-}
-
-function trimSentence(value: string) {
-  const cleaned = value.replace(/\s+/g, " ").trim();
-  return cleaned.length > 220 ? `${cleaned.slice(0, 217)}...` : cleaned;
-}
-
-function ensureTrailingNewline(value: string) {
-  return value.endsWith("\n") ? value : `${value}\n`;
 }
 
 function firstVisibleCardFilter(cards: NewAgentCardInput[]): CardFilter {
@@ -1883,15 +1475,6 @@ function LightningIcon() {
       <path d="M8.8 1.8 3.7 8.6h3.5l-.6 5.6 5.6-7.4H8.7z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
   );
-}
-
-function chatStreamLabel(tags: string[] | null) {
-  const safeTags = Array.isArray(tags) ? tags : [];
-  const role = safeTags.includes("assistant") ? "Assistant" : "You";
-  if (safeTags.includes("product")) return `${role} Product`;
-  if (safeTags.includes("technical")) return `${role} Technical`;
-  if (safeTags.includes("everything")) return `${role} Everything`;
-  return `${role} Chat`;
 }
 
 function sourceAgentLabel(mode: ChatMode) {

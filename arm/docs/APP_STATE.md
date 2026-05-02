@@ -2,7 +2,7 @@
 
 ## Summary
 
-ARM is currently a local-first project review workspace with:
+ARM is currently a project review workspace with:
 
 - project creation and selection
 - one editable `CURRENT_CONTEXT.md` per project

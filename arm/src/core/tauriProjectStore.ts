@@ -27,8 +27,6 @@ export const tauriProjectStore: ProjectStore = {
   loadDocument: (projectPath, documentId) => invoke<ProjectDocument>("load_document", { projectPath, documentId }),
   saveDocument: (projectPath, documentId, markdown) =>
     invoke<void>("save_document", { projectPath, documentId, markdown }),
-  loadCurrentContext: (projectPath) => invoke<string>("load_current_context", { projectPath }),
-  saveCurrentContext: (projectPath, markdown) => invoke<void>("save_current_context", { projectPath, markdown }),
   addChatNote: (projectPath, text, tags) => invoke<ChatNote>("add_chat_note", { projectPath, text, tags }),
   listChatNotes: (projectPath) => invoke<ChatNote[]>("list_chat_notes", { projectPath }),
   addDecision: (projectPath, text, reason) => invoke<Decision>("add_decision", { projectPath, text, reason }),

@@ -15,7 +15,6 @@ import {
 
 type BrowserProjectRecord = {
   project: Project;
-  context: string;
   documents: ProjectDocument[];
   notes: ChatNote[];
   decisions: Decision[];
@@ -54,7 +53,6 @@ export const browserProjectStore: ProjectStore = {
     };
     db.projects.push({
       project,
-      context: "",
       documents: [],
       notes: [],
       decisions: [],
@@ -63,17 +61,6 @@ export const browserProjectStore: ProjectStore = {
     });
     writeDb(db);
     return project;
-  },
-  async loadCurrentContext(projectPath) {
-    return getRecord(projectPath).context;
-  },
-  async saveCurrentContext(projectPath, markdown) {
-    const db = readDb();
-    const record = findRecord(db, projectPath);
-    const now = new Date().toISOString();
-    record.context = ensureTrailingNewline(markdown);
-    record.project.updatedAt = now;
-    writeDb(db);
   },
   async listDocuments(projectPath) {
     const db = readDb();
@@ -89,7 +76,6 @@ export const browserProjectStore: ProjectStore = {
     const record = findRecord(db, projectPath);
     const document = newDocument(record.project.id, trimmed, type);
     record.documents.unshift(document);
-    record.context = document.markdown;
     record.project.updatedAt = document.updatedAt;
     writeDb(db);
     return document;
@@ -108,7 +94,6 @@ export const browserProjectStore: ProjectStore = {
     if (!document) throw new Error("Document not found.");
     document.markdown = ensureTrailingNewline(markdown);
     document.updatedAt = new Date().toISOString();
-    record.context = document.markdown;
     record.project.updatedAt = document.updatedAt;
     writeDb(db);
   },

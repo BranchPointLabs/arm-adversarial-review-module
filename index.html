@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ARM - Adversarial Review Module</title>
+    <title>ARM - Adversarial Review for Product Documents</title>
     <meta
       name="description"
-      content="ARM is a local-first review tool that helps technical product teams turn working documents into clearer decisions."
+      content="ARM is an adversarial review tool for product documents. Ask targeted questions, get structured feedback, and improve documents without losing control."
     />
     <link rel="stylesheet" href="site.css" />
   </head>
@@ -19,14 +19,15 @@
           <span class="brand-mark">ARM</span>
           <span>
             <span class="brand-title">Adversarial Review Module</span>
-            <span class="brand-subtitle">Local-first review for technical product work</span>
+            <span class="brand-subtitle">Adversarial review for product documents</span>
           </span>
         </a>
 
         <nav class="site-nav" aria-label="Primary navigation">
-          <a href="#compare">Compare</a>
-          <a href="#workflow">Workflow</a>
-          <a href="#fit">Fit</a>
+          <a href="#problem">Problem</a>
+          <a href="#approach">Approach</a>
+          <a href="#workflow">How it works</a>
+          <a href="#principles">Principles</a>
         </nav>
       </div>
     </header>
@@ -34,119 +35,124 @@
     <main id="main">
       <section class="hero section">
         <div class="wrap narrow">
-          <p class="eyebrow">Local-first product review</p>
-          <h1>Keep one working document sharp.</h1>
+          <p class="eyebrow">ARM</p>
+          <h1>Adversarial review for product documents.</h1>
           <p class="lead">
-            ARM helps technical PMs and engineering leads review an idea or PRD without turning it into a long AI essay.
-            It produces small cards, lets you decide what matters, and updates the active document.
+            Ask targeted questions about your PRDs and ideas. ARM returns structured, focused feedback so you can
+            identify risks, evaluate decisions, and evolve the document without handing it over to AI.
           </p>
         </div>
       </section>
 
-      <section id="compare" class="section section-ruled">
-        <div class="wrap">
-          <div class="section-heading">
-            <p class="eyebrow">BMAD vs. ARM</p>
-            <h2>Different jobs, different tools.</h2>
-            <p>
-              BMAD is a broader methodology. ARM is a narrower review surface for keeping the current document useful.
-            </p>
+      <section id="problem" class="section section-ruled">
+        <div class="wrap split">
+          <div>
+            <p class="eyebrow">The problem</p>
+            <h2>Most AI tools generate documents.</h2>
           </div>
-
-          <div class="table-wrap" role="region" aria-label="BMAD and ARM comparison" tabindex="0">
-            <table>
-              <caption>
-                A plain comparison of what BMAD emphasizes compared with ARM.
-              </caption>
-              <thead>
-                <tr>
-                  <th scope="col">Need</th>
-                  <th scope="col">BMAD</th>
-                  <th scope="col">ARM</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th scope="row">Broad delivery method</th>
-                  <td>Yes</td>
-                  <td>No</td>
-                </tr>
-                <tr>
-                  <th scope="row">Review the active document</th>
-                  <td>Partial</td>
-                  <td>Yes</td>
-                </tr>
-                <tr>
-                  <th scope="row">Small review cards</th>
-                  <td>No</td>
-                  <td>Yes</td>
-                </tr>
-                <tr>
-                  <th scope="row">Accept, reject, or edit output</th>
-                  <td>Not central</td>
-                  <td>Yes</td>
-                </tr>
-                <tr>
-                  <th scope="row">Product and engineering personas</th>
-                  <td>Varies</td>
-                  <td>Yes</td>
-                </tr>
-                <tr>
-                  <th scope="row">Local project storage</th>
-                  <td>No</td>
-                  <td>Yes</td>
-                </tr>
-                <tr>
-                  <th scope="row">Replace human judgment</th>
-                  <td>No</td>
-                  <td>No</td>
-                </tr>
-              </tbody>
-            </table>
+          <div class="copy-block">
+            <p>That creates new work instead of removing it.</p>
+            <ul class="plain-list">
+              <li>You have to verify everything.</li>
+              <li>Subtle inaccuracies slip in.</li>
+              <li>Your original intent gets lost.</li>
+              <li>Maintaining the document becomes harder over time.</li>
+            </ul>
           </div>
         </div>
       </section>
 
-      <section id="workflow" class="section">
+      <section id="approach" class="section">
+        <div class="wrap split">
+          <div>
+            <p class="eyebrow">The ARM approach</p>
+            <h2>ARM does not generate documents.</h2>
+          </div>
+          <div class="copy-block">
+            <p>ARM works with your document. You stay in control of the artifact.</p>
+            <div class="comparison">
+              <div>
+                <h3>You</h3>
+                <ul class="plain-list">
+                  <li>Ask specific questions.</li>
+                  <li>Focus on areas that matter.</li>
+                  <li>Decide what changes.</li>
+                </ul>
+              </div>
+              <div>
+                <h3>ARM</h3>
+                <ul class="plain-list">
+                  <li>Returns targeted feedback.</li>
+                  <li>Highlights risks and gaps.</li>
+                  <li>Keeps responses concise and usable.</li>
+                </ul>
+              </div>
+            </div>
+            <p class="callout">No walls of text. No full rewrites.</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="workflow" class="section section-ruled">
         <div class="wrap">
           <div class="section-heading">
-            <p class="eyebrow">Workflow</p>
-            <h2>The loop is intentionally small.</h2>
+            <p class="eyebrow">How it works</p>
+            <h2>Ask. Review. Decide. Evolve.</h2>
           </div>
 
           <ol class="steps" aria-label="ARM workflow">
             <li>
-              <strong>Write or open a document.</strong>
-              <span>The selected document is the context for the review.</span>
+              <strong>Ask</strong>
+              <span>Ask focused questions like “What risks am I missing?” or “Where could this fail?”</span>
             </li>
             <li>
-              <strong>Ask for review.</strong>
-              <span>Use chat, product, technical, or combined review.</span>
+              <strong>Review</strong>
+              <span>ARM returns scoped feedback that is easy to scan and evaluate.</span>
             </li>
             <li>
-              <strong>Work through cards.</strong>
-              <span>Keep useful questions, warnings, and next steps.</span>
+              <strong>Decide</strong>
+              <span>Accept, ignore, or capture feedback as decisions while preserving your intent.</span>
             </li>
             <li>
-              <strong>Update the document.</strong>
-              <span>Accepted notes and decisions improve the source of truth.</span>
+              <strong>Evolve</strong>
+              <span>Apply targeted changes without wholesale rewrites.</span>
             </li>
           </ol>
         </div>
       </section>
 
-      <section id="fit" class="section section-ruled">
-        <div class="wrap split">
-          <div>
-            <p class="eyebrow">Good fit</p>
-            <h2>Use ARM when decisions need pressure.</h2>
+      <section id="principles" class="section">
+        <div class="wrap">
+          <div class="section-heading">
+            <p class="eyebrow">Core principles</p>
+            <h2>Built for controlled document evolution.</h2>
           </div>
-          <ul class="plain-list">
-            <li>Early product ideas that need sharper framing.</li>
-            <li>PRDs that need product and engineering review.</li>
-            <li>Technical direction that needs risks surfaced before build.</li>
-            <li>Projects where the context should stay local.</li>
-          </ul>
+
+          <div class="principles">
+            <article>
+              <h3>User-directed</h3>
+              <p>You control what gets reviewed and how.</p>
+            </article>
+            <article>
+              <h3>Targeted feedback</h3>
+              <p>No generic output. Only focused responses to your queries.</p>
+            </article>
+            <article>
+              <h3>Structured output</h3>
+              <p>Designed to be consumed quickly, not read like an essay.</p>
+            </article>
+            <article>
+              <h3>Controlled evolution</h3>
+              <p>Documents improve incrementally, not through wholesale replacement.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-final">
+        <div class="wrap narrow">
+          <p class="quote">Most tools generate more content. ARM helps you think better about the content you already have.</p>
+          <p class="lead">AI does not replace your document. It challenges it.</p>
         </div>
       </section>
     </main>
