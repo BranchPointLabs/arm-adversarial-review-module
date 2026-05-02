@@ -267,7 +267,18 @@
         font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
         font-size: 14px;
       }
-
+      .site-footer {
+        margin-top: 64px;
+        padding: 24px 0;
+        border-top: 1px solid #e5e5e5;
+        font-size: 14px;
+        color: #666;
+      }
+      
+      .site-footer a {
+        color: inherit;
+        text-decoration: underline;
+      }
       @media (max-width: 960px) {
         .hero-split { grid-template-columns: 1fr; }
         .hero-copy { max-width: none; }
@@ -486,5 +497,15 @@ npm install</code></pre>
         </div>
       </section>
     </main>
+    <footer class="site-footer">
+  <div class="wrap narrow">
+    <p>
+      Built by
+      <a href="https://github.com/CarltonBranch" target="_blank" rel="noopener">
+        CarltonBranch
+      </a>
+    </p>
+  </div>
+</footer>
   </body>
 </html>
