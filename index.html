@@ -6,7 +6,7 @@
     <title>ARM - Adversarial Review Module</title>
     <meta
       name="description"
-      content="ARM is a small adversarial review module for product documents. It gives targeted critique cards instead of generating large PRDs."
+      content="ARM is a desktop adversarial review module for product documents. It compares directly with BMAD by optimizing for control, correctness, and reviewable decisions instead of large generated documents."
     />
     <link rel="stylesheet" href="site.css" />
   </head>
@@ -19,91 +19,134 @@
           <span class="brand-mark">ARM</span>
           <span>
             <span class="brand-title">Adversarial Review Module</span>
-            <span class="brand-subtitle">Targeted critique for product documents</span>
+            <span class="brand-subtitle">Desktop critique for product work</span>
           </span>
         </a>
 
         <nav class="site-nav" aria-label="Primary navigation">
-          <a href="#why">Why</a>
-          <a href="#compare">ARM vs BMAD</a>
-          <a href="#use">Use</a>
+          <a href="#what">What it is</a>
+          <a href="#bmad">ARM vs BMAD</a>
+          <a href="#start">Start</a>
         </nav>
       </div>
     </header>
 
     <main id="main">
-      <section class="hero section">
+      <section id="what" class="hero section">
         <div class="wrap narrow">
           <p class="eyebrow">ARM</p>
-          <h1>Adversarial review. Not document generation.</h1>
+          <h1>Adversarial review for product decisions.</h1>
           <p class="lead">
-            ARM reviews product ideas, PRDs, RFCs, and plans by returning small critique cards you can accept,
-            reject, or edit.
+            ARM is a local desktop application for Windows, macOS, and Linux. It reviews product ideas, PRDs,
+            RFCs, and plans before code is written.
           </p>
-          <p class="lead compact">
-            It is built as a direct counterpoint to BMAD-style document generation: less output, more control.
+          <p>
+            ARM does not generate giant documents. It works against the document you already have and returns
+            small critique cards: risks, contradictions, questions, scope cuts, actions, and decision candidates.
           </p>
-        </div>
-      </section>
-
-      <section id="why" class="section section-ruled">
-        <div class="wrap split">
-          <div>
-            <p class="eyebrow">Why</p>
-            <h2>Generated documents are fast. Verifying them is slow.</h2>
-          </div>
-          <div class="copy-block">
-            <p>
-              Large AI-generated documents are hard to audit. Key flows can be missed, wording changes can alter meaning,
-              and later generations can quietly add requirements.
-            </p>
-            <p>
-              ARM keeps the review surface small. It pressures the document without replacing it.
-            </p>
+          <p>
+            You accept, reject, or edit each card. Changes stay explicit, reviewable, and user-approved.
+          </p>
+          <div class="hero-actions" aria-label="Project links">
+            <a class="button button-primary" href="https://github.com/BranchPointLabs/arm-adversarial-review-module">
+              View GitHub repo
+            </a>
+            <a class="button button-secondary" href="https://github.com/BranchPointLabs/arm-adversarial-review-module/blob/main/README.md">
+              Read setup instructions
+            </a>
           </div>
         </div>
       </section>
 
-      <section id="compare" class="section">
-        <div class="wrap split">
-          <div>
+      <section id="bmad" class="section section-ruled">
+        <div class="wrap">
+          <div class="section-heading">
             <p class="eyebrow">ARM vs BMAD</p>
-            <h2>Output vs control.</h2>
+            <h2>BMAD optimizes for generated output. ARM optimizes for controlled review.</h2>
           </div>
-          <div class="copy-block">
-            <div class="comparison">
-              <div>
-                <h3>BMAD</h3>
-                <ul class="plain-list">
-                  <li>Generates large artifacts.</li>
-                  <li>Requires comprehensive documentation.</li>
-                  <li>Optimizes for speed and volume.</li>
-                  <li>Leaves evaluation to the user.</li>
-                </ul>
-              </div>
-              <div>
-                <h3>ARM</h3>
-                <ul class="plain-list">
-                  <li>Returns focused critique cards.</li>
-                  <li>Works against the document you already have.</li>
-                  <li>Optimizes for direction and correctness.</li>
-                  <li>Captures decisions, risks, notes, and open questions.</li>
-                </ul>
-              </div>
-            </div>
+
+          <div class="table-scroll" role="region" aria-label="ARM versus BMAD comparison" tabindex="0">
+            <table class="comparison-table">
+              <thead>
+                <tr>
+                  <th scope="col">Area</th>
+                  <th scope="col">BMAD</th>
+                  <th scope="col">ARM</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Main job</th>
+                  <td>Generate large project artifacts through role-based workflows.</td>
+                  <td>Review existing documents through small, focused critique cards.</td>
+                </tr>
+                <tr>
+                  <th scope="row">Document model</th>
+                  <td>Requires documentation to become comprehensive enough to drive the workflow.</td>
+                  <td>Works against the document you already have and pressures the parts that matter.</td>
+                </tr>
+                <tr>
+                  <th scope="row">Output size</th>
+                  <td>Produces enough text that reading, evaluating, and reconciling the output becomes its own task.</td>
+                  <td>Produces concise cards that can be accepted, rejected, edited, or ignored.</td>
+                </tr>
+                <tr>
+                  <th scope="row">Risk</th>
+                  <td>Long outputs can miss key flows, bury weak assumptions, or hide contradictions inside polished prose.</td>
+                  <td>Surfaces risks, gaps, contradictions, and open questions directly.</td>
+                </tr>
+                <tr>
+                  <th scope="row">Change control</th>
+                  <td>Regeneration can introduce subtle wording changes, meaning changes, or new requirements that are hard to catch.</td>
+                  <td>Every proposed change is explicit and requires user approval before it affects the document.</td>
+                </tr>
+                <tr>
+                  <th scope="row">SDLC maintenance</th>
+                  <td>Document generation is fast, but maintaining decisions, notes, open questions, and project truth is not the core flow.</td>
+                  <td>Supports decisions, notes, open questions, accepted cards, and controlled document updates as first-class workflow pieces.</td>
+                </tr>
+                <tr>
+                  <th scope="row">Auditability</th>
+                  <td>High maintenance burden, low auditability: the user must meticulously check large documents for inaccuracies.</td>
+                  <td>Smaller review units create a clearer trail of what was challenged, accepted, rejected, or changed.</td>
+                </tr>
+                <tr>
+                  <th scope="row">Optimization</th>
+                  <td>Optimizes for speed, coverage, and output.</td>
+                  <td>Optimizes for direction, control, correctness, and human judgment.</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
         </div>
       </section>
 
-      <section id="use" class="section section-ruled section-final">
+      <section id="start" class="section section-final">
         <div class="wrap narrow">
-          <p class="eyebrow">Use</p>
-          <h2>Ask. Review. Decide.</h2>
-          <p class="lead">
-            Ask a targeted question. ARM returns cards for risks, contradictions, questions, actions, and decision candidates.
-            You decide what survives.
+          <p class="eyebrow">Start locally</p>
+          <h2>Clone ARM and run the desktop app.</h2>
+          <p>
+            Full setup instructions are in the
+            <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module/blob/main/README.md">README</a>.
           </p>
-          <p class="quote">BMAD helps produce documents. ARM helps keep product decisions controlled and reviewable.</p>
+
+          <div class="command-block">
+            <h3>1. Clone the repository</h3>
+            <pre><code>git clone https://github.com/BranchPointLabs/arm-adversarial-review-module.git
+cd arm-adversarial-review-module/arm
+npm install</code></pre>
+          </div>
+
+          <div class="command-block">
+            <h3>2. Run ARM locally</h3>
+            <pre><code>npm run tauri dev</code></pre>
+          </div>
+
+          <div class="command-block">
+            <h3>3. Build a desktop application</h3>
+            <p>Run this on the platform you want to package for: Windows, macOS, or Linux.</p>
+            <pre><code>npm run tauri build</code></pre>
+          </div>
         </div>
       </section>
     </main>
