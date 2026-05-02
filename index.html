@@ -1,144 +1,148 @@
 <!doctype html>
 <html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ARM - Control and Correctness Over Document Generation</title>
+    <meta
+      name="description"
+      content="ARM is an adversarial review module for product documents. It keeps product thinking controlled, auditable, and decision-focused instead of generating large documents that become difficult to verify."
+    />
+    <link rel="stylesheet" href="site.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
 
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ARM - Adversarial Review, Not Document Generation</title>
-  <meta name="description"
-    content="ARM is an adversarial review module for product thinking. It challenges PRDs, ideas, and technical plans with focused critique instead of generating long documents." />
-  <link rel="stylesheet" href="site.css" />
-</head>
+    <header class="site-header">
+      <div class="wrap header-row">
+        <a class="brand" href="./" aria-label="ARM home">
+          <span class="brand-mark">ARM</span>
+          <span>
+            <span class="brand-title">Adversarial Review Module</span>
+            <span class="brand-subtitle">Control and correctness over document generation</span>
+          </span>
+        </a>
 
-<body>
-  <a class="skip-link" href="#main">Skip to content</a>
-
-  <header class="site-header">
-    <div class="wrap header-row">
-      <a class="brand" href="./" aria-label="ARM home">
-        <span class="brand-mark">ARM</span>
-        <span>
-          <span class="brand-title">Adversarial Review Module</span>
-          <span class="brand-subtitle">Adversarial review. Not document generation.</span>
-        </span>
-      </a>
-
-      <nav class="site-nav" aria-label="Primary navigation">
-        <a href="#contrast">ARM vs BMAD</a>
-        <a href="#problem">Problem</a>
-        <a href="#workflow">How it works</a>
-        <a href="#principles">Principles</a>
-      </nav>
-    </div>
-  </header>
-
-  <main id="main">
-    <section class="hero section">
-      <div class="wrap narrow">
-        <p class="eyebrow">ARM</p>
-        <h1>Adversarial review. Not document generation.</h1>
-        <p class="lead">
-          Most AI tools write more product documents. ARM does the opposite: it challenges the document you already
-          have.
-        </p>
-        <p class="lead compact">
-          Ask a specific question. Get focused critique. Decide what changes.
-        </p>
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="#contrast">ARM vs BMAD</a>
+          <a href="#problem">Problem</a>
+          <a href="#workflow">How it works</a>
+          <a href="#principles">Principles</a>
+        </nav>
       </div>
-    </section>
+    </header>
 
-    <section id="contrast" class="section section-ruled">
-      <div class="wrap split">
-        <div>
-          <p class="eyebrow">Direct contrast</p>
-          <h2>ARM exists because BMAD solves the wrong problem.</h2>
+    <main id="main">
+      <section class="hero section">
+        <div class="wrap narrow">
+          <p class="eyebrow">ARM</p>
+          <h1>Product documents do not need more text. They need more pressure.</h1>
+          <p class="lead">
+            BMAD optimizes for fast document generation. ARM optimizes for control, correctness, and defensible decisions.
+          </p>
+          <p class="lead compact">
+            Ask targeted questions. Get structured critique. Accept only what survives review.
+          </p>
         </div>
-        <div class="copy-block">
-          <div class="comparison">
-            <div>
-              <h3>BMAD</h3>
-              <ul class="plain-list">
-                <li>Simulates roles.</li>
-                <li>Generates artifacts.</li>
-                <li>Produces long documents.</li>
-                <li>Leaves you to verify the output.</li>
-              </ul>
-            </div>
-            <div>
-              <h3>ARM</h3>
-              <ul class="plain-list">
-                <li>Applies pressure.</li>
-                <li>Returns review cards.</li>
-                <li>Forces decisions.</li>
-                <li>Keeps the document under your control.</li>
-              </ul>
-            </div>
+      </section>
+
+      <section id="contrast" class="section section-ruled">
+        <div class="wrap split">
+          <div>
+            <p class="eyebrow">Direct contrast</p>
+            <h2>ARM exists because generating the document is the easy part.</h2>
           </div>
-          <p class="callout">BMAD helps you write. ARM helps you think.</p>
+          <div class="copy-block">
+            <div class="comparison">
+              <div>
+                <h3>BMAD</h3>
+                <ul class="plain-list">
+                  <li>Generates large documents quickly.</li>
+                  <li>Requires the documentation to be comprehensive.</li>
+                  <li>May miss key flows inside oversized artifacts.</li>
+                  <li>Creates output that is slow to read and evaluate.</li>
+                  <li>Can introduce new requirements across generations.</li>
+                  <li>Leaves accuracy checking to the user.</li>
+                </ul>
+              </div>
+              <div>
+                <h3>ARM</h3>
+                <ul class="plain-list">
+                  <li>Reviews the document you already have.</li>
+                  <li>Uses targeted questions instead of blanket generation.</li>
+                  <li>Returns small review cards, not sprawling prose.</li>
+                  <li>Lets the user accept, reject, or edit every change.</li>
+                  <li>Captures decisions, notes, risks, and open questions.</li>
+                  <li>Keeps the document auditable as it evolves.</li>
+                </ul>
+              </div>
+            </div>
+            <p class="callout">BMAD optimizes for output. ARM optimizes for direction.</p>
+          </div>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section id="problem" class="section">
-      <div class="wrap split">
-        <div>
-          <p class="eyebrow">The problem</p>
-          <h2>More text usually means less clarity.</h2>
+      <section id="problem" class="section">
+        <div class="wrap split">
+          <div>
+            <p class="eyebrow">The problem</p>
+            <h2>Document generation is fast. Document evaluation is slow.</h2>
+          </div>
+          <div class="copy-block">
+            <p>
+              Large generated documents create a hidden maintenance burden. A small wording change can alter meaning. A later generation can add requirements. A missed flow can disappear inside pages of plausible text.
+            </p>
+            <p>
+              The user still has to meticulously inspect the output for inaccuracies, contradictions, scope creep, and implied commitments. As the document grows, the cost of verifying it grows with it.
+            </p>
+            <p>
+              That is the failure ARM is designed around: high maintenance, low auditability, and too much trust placed in generated prose.
+            </p>
+          </div>
         </div>
-        <div class="copy-block">
-          <p>
-            Large AI-generated documents feel productive, but they create a review burden. You still have to find the
-            weak assumptions, hidden contradictions, and vague commitments.
-          </p>
-          <p>
-            ARM is built for the moment before engineering handoff, when the question is not “Can AI write this?” but
-            “Should we build this, and what exactly are we committing to?”
-          </p>
+      </section>
+
+      <section id="workflow" class="section section-ruled">
+        <div class="wrap">
+          <div class="section-heading">
+            <p class="eyebrow">How it works</p>
+            <h2>Ask. Review. Decide. Maintain.</h2>
+          </div>
+
+          <ol class="steps" aria-label="ARM workflow">
+            <li>
+              <strong>Ask</strong>
+              <span>Ask a specific question about a PRD, idea, RFC, or plan.</span>
+            </li>
+            <li>
+              <strong>Review</strong>
+              <span>ARM returns focused critique cards: risks, contradictions, questions, actions, and decision candidates.</span>
+            </li>
+            <li>
+              <strong>Decide</strong>
+              <span>Accept, reject, or edit each card before it affects the document.</span>
+            </li>
+            <li>
+              <strong>Maintain</strong>
+              <span>Log decisions, add notes, track open questions, and evolve the document without losing control.</span>
+            </li>
+          </ol>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <section id="workflow" class="section section-ruled">
-      <div class="wrap">
-        <div class="section-heading">
-          <p class="eyebrow">How it works</p>
-          <h2>Ask. Review. Decide. Update.</h2>
+      <section id="principles" class="section section-final">
+        <div class="wrap narrow">
+          <p class="eyebrow">Principles</p>
+          <h2>Control and correctness over speed.</h2>
+          <ul class="plain-list principle-list">
+            <li>Evaluation over generation.</li>
+            <li>Direction over output.</li>
+            <li>Auditability over volume.</li>
+            <li>Accepted decisions over generated prose.</li>
+          </ul>
+          <p class="quote">BMAD helps produce documents. ARM helps keep product decisions correct, controlled, and reviewable.</p>
         </div>
-
-        <ol class="steps" aria-label="ARM workflow">
-          <li>
-            <strong>Ask</strong>
-            <span>Ask a targeted question about a PRD, idea, RFC, or plan.</span>
-          </li>
-          <li>
-            <strong>Review</strong>
-            <span>ARM returns concise critique cards instead of essays.</span>
-          </li>
-          <li>
-            <strong>Decide</strong>
-            <span>Accept, reject, or edit the feedback.</span>
-          </li>
-          <li>
-            <strong>Update</strong>
-            <span>Use only the accepted feedback to evolve the document.</span>
-          </li>
-        </ol>
-      </div>
-    </section>
-
-    <section id="principles" class="section section-final">
-      <div class="wrap narrow">
-        <p class="eyebrow">Principles</p>
-        <h2>Decisions over documents.</h2>
-        <ul class="plain-list principle-list">
-          <li>Pressure over generation.</li>
-          <li>Cards over walls of text.</li>
-          <li>User control over autonomous rewrite.</li>
-        </ul>
-        <p class="quote">Most tools generate more content. ARM makes your existing content survive scrutiny.</p>
-      </div>
-    </section>
-  </main>
-</body>
-
+      </section>
+    </main>
+  </body>
 </html>
