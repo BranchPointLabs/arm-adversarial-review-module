@@ -17,6 +17,7 @@ import Modal from "../shared/Modal";
 type ViewKey = "context" | "notes" | "decisions" | "references" | "review" | "document";
 type ChatMode = "chat" | "product" | "technical" | "everything";
 type CardFilter = "info" | "open_question" | "warning" | "action";
+type ResolveKind = "patch" | "decision" | "open_question";
 
 const acceptedReferenceTypes = [
   ".txt",
@@ -63,6 +64,8 @@ export default function ProjectWorkspace() {
   const [prompt, setPrompt] = React.useState("");
   const [chatMode, setChatMode] = React.useState<ChatMode>("chat");
   const [cardFilter, setCardFilter] = React.useState<CardFilter>("info");
+  const [showAllCards, setShowAllCards] = React.useState(false);
+  const [showDismissedCards, setShowDismissedCards] = React.useState(false);
 
   const [addDocumentOpen, setAddDocumentOpen] = React.useState(false);
   const [newDocumentName, setNewDocumentName] = React.useState("");
@@ -74,12 +77,8 @@ export default function ProjectWorkspace() {
   const [updateKind, setUpdateKind] = React.useState<"note" | "decision">("note");
   const [updateStatus, setUpdateStatus] = React.useState<string | null>(null);
 
-  const [editCard, setEditCard] = React.useState<AgentCard | null>(null);
-  const [editCardTitle, setEditCardTitle] = React.useState("");
-  const [editCardBody, setEditCardBody] = React.useState("");
-  const [editCardUpdate, setEditCardUpdate] = React.useState("");
   const [resolveCard, setResolveCard] = React.useState<AgentCard | null>(null);
-  const [resolveKind, setResolveKind] = React.useState<"note" | "decision">("note");
+  const [resolveKind, setResolveKind] = React.useState<ResolveKind>("patch");
   const [resolveText, setResolveText] = React.useState("");
   const [resolveStatus, setResolveStatus] = React.useState<string | null>(null);
 
@@ -94,7 +93,7 @@ export default function ProjectWorkspace() {
   const routeDocumentId = route.documentId;
   const activeContextMarkdown = activeDocument ? documentMarkdown : "";
   const stickyNotes = notes.filter(isStickyNote);
-  const sidebarItems = buildSidebarItems(cards, cardFilter);
+  const sidebarItems = buildSidebarItems(cards, cardFilter, showAllCards, showDismissedCards);
 
   React.useEffect(() => {
     if (!projectPath) return;
@@ -229,30 +228,15 @@ export default function ProjectWorkspace() {
     try {
       await projectStore.addChatNote(projectPath, text, ["chat", "user", chatMode]);
       if (chatMode === "chat") {
-        const reply = await generateChatReplyWithLlm({
-          prompt: text,
-          mode: "chat",
-          activeDocument,
-          currentContext: activeContextMarkdown,
-          notes,
-          decisions,
-          references,
-        });
-        await projectStore.createAgentCards(projectPath, "ARM Assistant", [
-          {
-            type: "info",
-            title: "Assistant response",
-            body: reply,
-            proposedUpdate: null,
-            targetSection: null,
-            sourceAgent: "ARM Assistant",
-          },
-        ]);
-        setStatus("Info card added.");
+        const newCard = await generateChatInfoCard(text, chatMode);
+        await projectStore.createAgentCards(projectPath, newCard.sourceAgent || sourceAgentLabel(chatMode), [newCard]);
+        setStatus("Persona reply added.");
+        setCardFilter("info");
       } else {
         const newCards = await buildCardsForPrompt(text);
         await projectStore.createAgentCards(projectPath, sourceAgentLabel(chatMode), newCards);
         setStatus(newCards.length > 1 ? "Cards added." : "Card added.");
+        setCardFilter(firstVisibleCardFilter(newCards));
       }
 
       setPrompt("");
@@ -270,10 +254,12 @@ export default function ProjectWorkspace() {
 
     try {
       if (chatMode === "product") {
-        return await generateReviewCardsWithMode(text, "product");
+        const cards = await generateReviewCardsWithMode(text, "product");
+        return ensureMinimumReviewCards(cards, heuristicFallback("product"), 3);
       }
       if (chatMode === "technical") {
-        return await generateReviewCardsWithMode(text, "technical");
+        const cards = await generateReviewCardsWithMode(text, "technical");
+        return ensureMinimumReviewCards(cards, heuristicFallback("technical"), 3);
       }
       const results = await Promise.allSettled([
         generateReviewCardsWithMode(text, "product"),
@@ -282,11 +268,16 @@ export default function ProjectWorkspace() {
       const merged = results
         .filter((item): item is PromiseFulfilledResult<NewAgentCardInput[]> => item.status === "fulfilled")
         .flatMap((item) => item.value);
-      if (merged.length > 0) return dedupeCards(merged).slice(0, 6);
+      const overviewCard = await generateChatInfoCard(text, "chat").catch(() => fallbackInfoCard(text));
+      const everythingCards = dedupeCards([overviewCard, ...merged]);
+      if (everythingCards.length > 0) {
+        return ensureMinimumReviewCards(everythingCards, heuristicFallback("everything"), 7).slice(0, 11);
+      }
       throw new Error("LLM review failed.");
     } catch (error: any) {
       setStatus(`${typeof error === "string" ? error : error?.message || "LLM review failed."} Falling back to local review.`);
-      return heuristicFallback(chatMode === "everything" ? "everything" : (chatMode as "product" | "technical"));
+      const mode = chatMode === "everything" ? "everything" : (chatMode as "product" | "technical");
+      return ensureMinimumReviewCards([], heuristicFallback(mode), mode === "everything" ? 7 : 3);
     }
   }
 
@@ -300,6 +291,27 @@ export default function ProjectWorkspace() {
       decisions,
       references,
     });
+  }
+
+  async function generateChatInfoCard(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput> {
+    const reply = await generateChatReplyWithLlm({
+      prompt: text,
+      mode,
+      activeDocument,
+      currentContext: activeContextMarkdown,
+      notes,
+      decisions,
+      references,
+    });
+
+    return {
+      type: "info",
+      title: chatInfoCardTitle(mode),
+      body: reply,
+      proposedUpdate: null,
+      targetSection: null,
+      sourceAgent: sourceAgentLabel(mode),
+    };
   }
 
   function buildContextCardsFallback(text: string, mode: "product" | "technical" | "everything") {
@@ -359,7 +371,7 @@ export default function ProjectWorkspace() {
 
   function openResolveCard(card: AgentCard) {
     setResolveCard(card);
-    setResolveKind("note");
+    setResolveKind("patch");
     setResolveText(card.proposedUpdate || card.body);
     setResolveStatus(null);
   }
@@ -378,48 +390,23 @@ export default function ProjectWorkspace() {
 
     setBusy(true);
     try {
-      const nextMarkdown = await buildDocumentUpdate(trimmed, resolveKind);
+      const nextMarkdown =
+        resolveKind === "patch"
+          ? await buildDocumentUpdate(trimmed, "note")
+          : applyResolutionToDocument(documentMarkdown, resolveKind, trimmed);
       await projectStore.saveDocument(projectPath, activeDocument.id, nextMarkdown);
       setDocumentMarkdown(nextMarkdown);
       if (resolveKind === "decision") {
         await projectStore.addDecision(projectPath, trimmed, null);
-      } else {
-        await projectStore.addChatNote(projectPath, trimmed, ["note"]);
       }
-      await projectStore.updateAgentCard(projectPath, resolveCard.id, { status: "resolved" });
+      await projectStore.updateAgentCard(projectPath, resolveCard.id, { status: "accepted" });
       setResolveCard(null);
       setResolveText("");
       setResolveStatus(null);
       await refreshAll();
-      setStatus("Card resolved.");
+      setStatus("Card accepted.");
     } catch (error: any) {
       setResolveStatus(typeof error === "string" ? error : error?.message || "Resolve failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function openEditCard(card: AgentCard) {
-    setEditCard(card);
-    setEditCardTitle(card.title);
-    setEditCardBody(card.body);
-    setEditCardUpdate(card.proposedUpdate || "");
-  }
-
-  async function saveEditedCard() {
-    if (!editCard) return;
-    setBusy(true);
-    try {
-      await projectStore.updateAgentCard(projectPath, editCard.id, {
-        status: "edited",
-        title: editCardTitle.trim() || editCard.title,
-        body: editCardBody.trim() || editCard.body,
-        proposedUpdate: editCardUpdate.trim() || null,
-      });
-      setEditCard(null);
-      await refreshAll();
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Edit failed.");
     } finally {
       setBusy(false);
     }
@@ -628,12 +615,30 @@ export default function ProjectWorkspace() {
             <button
               key={filter}
               type="button"
-              className={"segmentedPill" + (cardFilter === filter ? " active" : "")}
+              className={`segmentedPill cardTypePill cardTypePill-${filter}` + (cardFilter === filter ? " active" : "")}
               onClick={() => setCardFilter(filter)}
             >
-              {cardFilterLabel(filter)}
+              {cardFilterLabel(filter)} ({countCards(cards, filter, showDismissedCards)})
             </button>
           ))}
+        </div>
+        <div className="sidebarVisibilityControls">
+          <label className="sidebarCheckbox">
+            <input
+              type="checkbox"
+              checked={showAllCards}
+              onChange={(event) => setShowAllCards(event.target.checked)}
+            />
+            <span>Show all</span>
+          </label>
+          <label className="sidebarCheckbox">
+            <input
+              type="checkbox"
+              checked={showDismissedCards}
+              onChange={(event) => setShowDismissedCards(event.target.checked)}
+            />
+            <span>Show dismissed</span>
+          </label>
         </div>
         <div className="inputCardList unifiedStream">
           {sidebarItems.map((item) => (
@@ -641,8 +646,7 @@ export default function ProjectWorkspace() {
               key={item.id}
               item={item}
               onAccept={openResolveCard}
-              onReject={(card) => void setCardStatus(card, "rejected")}
-              onEdit={openEditCard}
+              onDismiss={(card) => void setCardStatus(card, "rejected")}
             />
           ))}
           {sidebarItems.length === 0 ? <div className="muted">No activity here yet.</div> : null}
@@ -786,34 +790,6 @@ export default function ProjectWorkspace() {
         </Modal>
       ) : null}
 
-      {editCard ? (
-        <Modal
-          title="Edit Card"
-          onClose={() => setEditCard(null)}
-          footer={
-            <>
-              <button type="button" className="secondary" onClick={() => setEditCard(null)}>
-                Cancel
-              </button>
-              <button type="button" className="primary" onClick={() => void saveEditedCard()} disabled={busy}>
-                Save
-              </button>
-            </>
-          }
-        >
-          <div className="stack">
-            <input className="textInput" value={editCardTitle} onChange={(event) => setEditCardTitle(event.target.value)} />
-            <textarea className="miniEditor" value={editCardBody} onChange={(event) => setEditCardBody(event.target.value)} />
-            <textarea
-              className="miniEditor"
-              value={editCardUpdate}
-              placeholder="Proposed update"
-              onChange={(event) => setEditCardUpdate(event.target.value)}
-            />
-          </div>
-        </Modal>
-      ) : null}
-
       {resolveCard ? (
         <Modal
           title="Resolve Card"
@@ -830,23 +806,21 @@ export default function ProjectWorkspace() {
           }
         >
           <div className="stack">
-            <div className="segmentedControl sidebarActionBar">
-              {(["note", "decision"] as const).map((kind) => (
+            <div className="segmentedControl resolveActionBar">
+              {(["patch", "decision", "open_question"] as const).map((kind) => (
                 <button
                   key={kind}
                   type="button"
                   className={"segmentedPill" + (resolveKind === kind ? " active" : "")}
                   onClick={() => setResolveKind(kind)}
                 >
-                  {kind === "note" ? "Note" : "Decision"}
+                  {resolveKindLabel(kind)}
                 </button>
               ))}
             </div>
             <textarea className="miniEditor" value={resolveText} onChange={(event) => setResolveText(event.target.value)} />
             <div className="surfaceCopy">
-              {resolveKind === "decision"
-                ? "This will patch the active document, add a decision log entry, and mark the card as resolved."
-                : "This will patch the active document, store a note, and mark the card as resolved."}
+              {resolveKindDescription(resolveKind)}
             </div>
             {resolveStatus ? <div className="status">{resolveStatus}</div> : null}
           </div>
@@ -1051,8 +1025,15 @@ export default function ProjectWorkspace() {
         }
         actions={
           <div className="row">
-            <button type="button" className="secondary" onClick={() => setUpdateOpen(true)}>
-              Update
+            <button
+              type="button"
+              className="iconButton"
+              title="Update document"
+              aria-label="Update document"
+              disabled={!activeDocument}
+              onClick={() => setUpdateOpen(true)}
+            >
+              <PencilIcon />
             </button>
             <button
               type="button"
@@ -1170,18 +1151,26 @@ type SidebarItem =
   | { kind: "decision"; id: string; createdAt: string; text: string; reason: string | null }
   | { kind: "card"; id: string; createdAt: string; card: AgentCard };
 
-function buildSidebarItems(cards: AgentCard[], cardFilter: CardFilter): SidebarItem[] {
+function buildSidebarItems(
+  cards: AgentCard[],
+  cardFilter: CardFilter,
+  showAllCards: boolean,
+  showDismissedCards: boolean,
+): SidebarItem[] {
   return cards
-    .filter((card) => card.type === cardFilter)
+    .filter((card) => (showAllCards || card.type === cardFilter) && (showDismissedCards || card.status !== "rejected"))
     .map((card) => ({ kind: "card" as const, id: card.id, createdAt: card.createdAt, card }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+function countCards(cards: AgentCard[], cardFilter: CardFilter, showDismissedCards: boolean) {
+  return cards.filter((card) => card.type === cardFilter && (showDismissedCards || card.status !== "rejected")).length;
 }
 
 function SidebarItemView(props: {
   item: SidebarItem;
   onAccept: (card: AgentCard) => void;
-  onReject: (card: AgentCard) => void;
-  onEdit: (card: AgentCard) => void;
+  onDismiss: (card: AgentCard) => void;
 }) {
   const item = props.item;
   if (item.kind === "chat") {
@@ -1216,7 +1205,7 @@ function SidebarItemView(props: {
   return (
     <div className={"reviewCard reviewCard-" + card.status}>
       <div className="reviewCardHeader">
-        <span className="reviewCardType">{formatCardType(card.type)}</span>
+        <span className={"reviewCardType cardTypeBadge cardTypeBadge-" + card.type}>{formatCardType(card.type)}</span>
         <span className="reviewCardStatus">{card.status}</span>
       </div>
       <div className="reviewCardTitle">{card.title}</div>
@@ -1226,11 +1215,8 @@ function SidebarItemView(props: {
         <button type="button" className="secondary" onClick={() => props.onAccept(card)}>
           Accept
         </button>
-        <button type="button" className="secondary" onClick={() => props.onReject(card)}>
-          Reject
-        </button>
-        <button type="button" className="secondary" onClick={() => props.onEdit(card)}>
-          Edit
+        <button type="button" className="secondary" onClick={() => props.onDismiss(card)}>
+          Dismiss
         </button>
       </div>
     </div>
@@ -1279,6 +1265,168 @@ function chatModeLabel(mode: ChatMode) {
   return "Everything";
 }
 
+function chatInfoCardTitle(mode: ChatPersonaMode) {
+  if (mode === "product") return "Product response";
+  if (mode === "technical") return "Technical response";
+  return "Assistant response";
+}
+
+function resolveKindLabel(kind: ResolveKind) {
+  if (kind === "patch") return "Patch";
+  if (kind === "decision") return "Decision";
+  return "Open Questions";
+}
+
+function resolveKindDescription(kind: ResolveKind) {
+  if (kind === "patch") {
+    return "This will use the patch flow to integrate the text into the active document and accept the card.";
+  }
+  if (kind === "decision") {
+    return "This will add the text under Decision Log, add it to the project decision log, and accept the card.";
+  }
+  return "This will add the text under Open Questions and accept the card.";
+}
+
+function applyResolutionToDocument(markdown: string, kind: Exclude<ResolveKind, "patch">, text: string) {
+  const section = kind === "decision" ? "Decision Log" : "Open Questions";
+  return appendListItemToSection(markdown, section, text);
+}
+
+function appendListItemToSection(markdown: string, sectionTitle: string, text: string) {
+  const normalized = markdown.trimEnd();
+  const item = `- ${text}`;
+  const headingPattern = new RegExp(`(^|\\n)##\\s+${escapeRegExp(sectionTitle)}\\s*\\n`, "i");
+  const match = headingPattern.exec(normalized);
+
+  if (!match || match.index === undefined) {
+    return `${normalized}\n\n## ${sectionTitle}\n${item}\n`;
+  }
+
+  const sectionStart = match.index + match[0].length;
+  const nextHeadingIndex = normalized.slice(sectionStart).search(/\n##\s+/);
+  if (nextHeadingIndex === -1) {
+    return `${normalized.slice(0, sectionStart)}${item}\n${normalized.slice(sectionStart).replace(/^\s+/, "")}\n`;
+  }
+
+  const insertAt = sectionStart + nextHeadingIndex;
+  const before = normalized.slice(0, insertAt).trimEnd();
+  const after = normalized.slice(insertAt);
+  return `${before}\n${item}\n${after}\n`;
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function firstVisibleCardFilter(cards: NewAgentCardInput[]): CardFilter {
+  return cards.some((card) => card.type === "info") ? "info" : cards[0]?.type || "info";
+}
+
+function ensureMinimumReviewCards(
+  cards: NewAgentCardInput[],
+  fallbackCards: NewAgentCardInput[],
+  minimum: number,
+): NewAgentCardInput[] {
+  const combined = dedupeCards([...cards, ...fallbackCards, ...syntheticReviewCards(cards, fallbackCards)]);
+  if (combined.length >= minimum) return combined;
+  const toppedUp = [...combined];
+  while (toppedUp.length < minimum) {
+    toppedUp.push(supplementalReviewCard(toppedUp.length + 1, toppedUp[0]?.sourceAgent || "ARM Review"));
+  }
+  return dedupeCards(toppedUp).slice(0, minimum);
+}
+
+function syntheticReviewCards(primary: NewAgentCardInput[], fallback: NewAgentCardInput[]): NewAgentCardInput[] {
+  const cards = [...primary, ...fallback];
+  const sourceAgent = cards[0]?.sourceAgent || "ARM Review";
+  const missing: NewAgentCardInput[] = [];
+
+  if (!cards.some((card) => card.type === "info")) {
+    missing.push({
+      type: "info",
+      title: "Review orientation",
+      body: "This review should be read as decision support for the active document, not as an automatic approval to build.",
+      proposedUpdate: null,
+      targetSection: "Current direction",
+      sourceAgent,
+    });
+  }
+  if (!cards.some((card) => card.type === "warning")) {
+    missing.push({
+      type: "warning",
+      title: "Unvalidated assumption",
+      body: "The current direction still depends on an assumption that should be made explicit before the next build or planning step.",
+      proposedUpdate: "Add the riskiest assumption and the cheapest way to test it.",
+      targetSection: "Risks",
+      sourceAgent,
+    });
+  }
+  if (!cards.some((card) => card.type === "open_question")) {
+    missing.push({
+      type: "open_question",
+      title: "Decision criteria",
+      body: "The document should name what evidence would make this direction a yes, no, or revise decision.",
+      proposedUpdate: "Add decision criteria for continuing, changing, or stopping this work.",
+      targetSection: "Open questions",
+      sourceAgent,
+    });
+  }
+  if (!cards.some((card) => card.type === "action")) {
+    missing.push({
+      type: "action",
+      title: "Next validation step",
+      body: "Pick one small action that reduces uncertainty before the scope expands.",
+      proposedUpdate: "Add one concrete next step with an owner or completion condition.",
+      targetSection: "Next actions",
+      sourceAgent,
+    });
+  }
+
+  return missing;
+}
+
+function fallbackInfoCard(prompt: string): NewAgentCardInput {
+  return {
+    type: "info",
+    title: "Combined review",
+    body: `Review requested: ${prompt}`,
+    proposedUpdate: null,
+    targetSection: "Current direction",
+    sourceAgent: "ARM Assistant",
+  };
+}
+
+function supplementalReviewCard(index: number, sourceAgent: string): NewAgentCardInput {
+  const templates: NewAgentCardInput[] = [
+    {
+      type: "action",
+      title: "Confirm the next move",
+      body: "The review needs one explicit next move so the team can act instead of continuing to discuss the whole problem space.",
+      proposedUpdate: "Add the next concrete move and the condition that marks it complete.",
+      targetSection: "Next actions",
+      sourceAgent,
+    },
+    {
+      type: "open_question",
+      title: "Resolve the main uncertainty",
+      body: "The active document should name the most important unanswered question before more scope is added.",
+      proposedUpdate: "Add the main open question that blocks a confident decision.",
+      targetSection: "Open questions",
+      sourceAgent,
+    },
+    {
+      type: "warning",
+      title: "Avoid false confidence",
+      body: "The current direction may look more certain than the evidence supports.",
+      proposedUpdate: "Add the weakest evidence point or biggest assumption.",
+      targetSection: "Risks",
+      sourceAgent,
+    },
+  ];
+  const card = templates[index % templates.length];
+  return { ...card, title: `${card.title} ${index}` };
+}
+
 function composerPlaceholder(mode: ChatMode) {
   if (mode === "chat") return "Ask ARM anything about this document...";
   if (mode === "product") return "Ask the product persona to evaluate this...";
@@ -1305,6 +1453,15 @@ function SaveIcon() {
       <path d="M3 2.5h8l2 2V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" strokeWidth="1.4" />
       <path d="M5 2.5v4h5v-4" fill="none" stroke="currentColor" strokeWidth="1.4" />
       <rect x="5" y="9" width="6" height="3" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M3.5 11.8 4.1 14l2.2-.6 6.9-6.9-2.8-2.8z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="m9.5 4.6 2.8 2.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
     </svg>
   );
 }

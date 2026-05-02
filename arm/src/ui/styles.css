@@ -7,6 +7,14 @@
   --muted: #645c4f;
   --line: #d7cebf;
   --line-strong: #bda98a;
+  --info-bg: #eaf3ff;
+  --info-fg: #214c77;
+  --question-bg: #f0eaff;
+  --question-fg: #4e3a86;
+  --warning-bg: #fff1cd;
+  --warning-fg: #7a4b12;
+  --action-bg: #e7f6ee;
+  --action-fg: #245b3c;
   --shadow: 0 20px 60px rgba(31, 24, 14, 0.12);
 }
 
@@ -172,22 +180,22 @@ button:disabled {
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 340px;
+  grid-template-columns: 260px minmax(0, 1fr) 420px;
   grid-template-rows: minmax(0, 1fr) auto;
   overflow: hidden;
 }
 
 .armWorkspace.navCollapsed {
-  grid-template-columns: 56px minmax(420px, 1fr) 340px;
+  grid-template-columns: 56px minmax(420px, 1fr) 420px;
 }
 
 .documentWorkspace {
-  grid-template-columns: 248px minmax(420px, 1fr) 340px;
+  grid-template-columns: 248px minmax(420px, 1fr) 420px;
   grid-template-rows: minmax(0, 1fr) auto;
 }
 
 .documentWorkspace.navCollapsed {
-  grid-template-columns: 56px minmax(420px, 1fr) 340px;
+  grid-template-columns: 56px minmax(420px, 1fr) 420px;
 }
 
 .navPane,
@@ -400,7 +408,7 @@ button:disabled {
   background: rgba(255, 250, 242, 0.72);
   padding: 16px;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
   overflow: hidden;
 }
@@ -442,6 +450,29 @@ button:disabled {
 
 .unifiedStream {
   padding-right: 4px;
+}
+
+.sidebarVisibilityControls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 24px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sidebarCheckbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.sidebarCheckbox input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--ink);
 }
 
 .streamItem {
@@ -615,14 +646,59 @@ button:disabled {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.segmentedControl.resolveActionBar {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .segmentedControl.sidebarFeatureBar .segmentedPill,
-.segmentedControl.sidebarActionBar .segmentedPill {
+.segmentedControl.sidebarActionBar .segmentedPill,
+.segmentedControl.resolveActionBar .segmentedPill {
   min-width: 0;
   min-height: 30px;
   padding: 6px 4px;
   font-size: 12px;
   line-height: 1;
   white-space: nowrap;
+}
+
+.cardTypePill-info {
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+
+.cardTypePill-open_question {
+  background: var(--question-bg);
+  color: var(--question-fg);
+}
+
+.cardTypePill-warning {
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+
+.cardTypePill-action {
+  background: var(--action-bg);
+  color: var(--action-fg);
+}
+
+.cardTypePill.active {
+  color: #fff;
+}
+
+.cardTypePill-info.active {
+  background: var(--info-fg);
+}
+
+.cardTypePill-open_question.active {
+  background: var(--question-fg);
+}
+
+.cardTypePill-warning.active {
+  background: var(--warning-fg);
+}
+
+.cardTypePill-action.active {
+  background: var(--action-fg);
 }
 
 .focusHeader {
@@ -969,6 +1045,34 @@ button:disabled {
   font-weight: 800;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.cardTypeBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 7px;
+  line-height: 1;
+}
+
+.cardTypeBadge-info {
+  background: var(--info-bg);
+  color: var(--info-fg);
+}
+
+.cardTypeBadge-open_question {
+  background: var(--question-bg);
+  color: var(--question-fg);
+}
+
+.cardTypeBadge-warning {
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+
+.cardTypeBadge-action {
+  background: var(--action-bg);
+  color: var(--action-fg);
 }
 
 .reviewCardTitle {

@@ -29,6 +29,7 @@ const cardSchema = {
   properties: {
     cards: {
       type: "array",
+      minItems: 3,
       maxItems: 5,
       items: {
         type: "object",
@@ -81,10 +82,7 @@ export async function generateChatReplyWithLlm(input: {
     throw new Error(`No ${providerLabel(settings.provider)} API key saved.`);
   }
 
-  const instructions =
-    input.mode === "chat"
-      ? generalChatPersona()
-      : personaForMode(input.mode === "product" ? "product" : "technical");
+  const instructions = buildChatInstruction(input.mode);
 
   const payload = buildChatPayload(input);
 
@@ -135,12 +133,15 @@ function buildInstruction(mode: ProviderReviewMode) {
     personaForMode(mode),
     "",
     "Return JSON only.",
-    "Output at most 5 cards.",
+    "Output 3 to 5 cards.",
+    "Prefer 4 cards when the prompt has enough substance.",
     "Each card must be concise and actionable.",
     "Do not repeat the artifact back to the user.",
     "Do not produce summary prose outside the JSON schema.",
     "Use targetSection values that fit the living context document, such as 'What this project is', 'Current direction', 'Important decisions', 'Constraints', 'Open questions', or 'Risks'.",
     "Only use these card types: info, open_question, action, warning.",
+    "For product and technical reviews, include a useful mix of card types. Do not return only info cards.",
+    "When possible include: one info card, one warning card, one open_question card, and one action card.",
   ].join("\n");
 }
 
@@ -178,14 +179,40 @@ function buildChatPayload(input: {
         })),
       responseRules: [
         "Respond as a direct assistant reply to the user.",
-        "Be concise.",
-        "Use bullets only when they help.",
-        "If the user is asking for evaluation, include a recommendation and next steps.",
+        "Do not return JSON.",
+        "Do not create a tiny generic answer.",
+        "Ground the response in the active document and the user's prompt.",
+        "If the user is asking for evaluation, include a recommendation, the reasoning, and concrete next steps.",
+        "Use short sections or bullets when that makes the answer easier to scan.",
       ],
     },
     null,
     2,
   );
+}
+
+function buildChatInstruction(mode: ChatPersonaMode) {
+  if (mode === "chat") {
+    return [
+      generalChatPersona(),
+      "",
+      "Give a useful answer that is specific to the active document.",
+      "If the user asks a simple factual question, answer directly.",
+      "If the user asks for judgment or evaluation, include: answer, reasoning, and next steps.",
+    ].join("\n");
+  }
+
+  const label = mode === "product" ? "product/CEO" : "engineering";
+  return [
+    personaForMode(mode),
+    "",
+    `You are answering in ${label} persona chat mode, not generating review-card JSON.`,
+    "Give a substantive but compact answer.",
+    "Be specific to the active document and the user's question.",
+    "Include a clear recommendation when the prompt asks for judgment.",
+    "Include 2-5 concrete next steps when useful.",
+    "Do not just say the idea needs validation. Explain what to validate, why, and what decision it unlocks.",
+  ].join("\n");
 }
 
 function buildReviewPayload(input: ReviewRequest) {

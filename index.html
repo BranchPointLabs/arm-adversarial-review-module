@@ -3,135 +3,101 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ARM</title>
+    <title>ARM - Adversarial Review Module</title>
     <meta
       name="description"
-      content="ARM is a local-first adversarial review module for turning rough product and engineering thinking into sharper decisions."
+      content="ARM is a local-first review tool that helps technical product teams turn working documents into clearer decisions."
     />
     <link rel="stylesheet" href="site.css" />
   </head>
   <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
     <header class="site-header">
       <div class="wrap header-row">
-        <div class="brand">
-          <div class="brand-mark">ARM</div>
-          <div>
-            <div class="brand-title">Adversarial Review Module</div>
-            <div class="brand-subtitle">Local-first review for technical product work</div>
-          </div>
-        </div>
-        <nav class="site-nav" aria-label="Primary">
-          <a href="#what-it-is">What it is</a>
-          <a href="#compare">BMAD vs. ARM</a>
-          <a href="#how-it-works">How it works</a>
+        <a class="brand" href="./" aria-label="ARM home">
+          <span class="brand-mark">ARM</span>
+          <span>
+            <span class="brand-title">Adversarial Review Module</span>
+            <span class="brand-subtitle">Local-first review for technical product work</span>
+          </span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="#compare">Compare</a>
+          <a href="#workflow">Workflow</a>
+          <a href="#fit">Fit</a>
         </nav>
       </div>
     </header>
 
-    <main>
-      <section class="hero">
-        <div class="wrap hero-grid">
-          <div class="hero-copy">
-            <p class="eyebrow">Sharper decisions, less document sprawl</p>
-            <h1>ARM turns rough thinking into review cards and cleaner project truth.</h1>
-            <p class="lead">
-              ARM is a local-first desktop tool for technical PMs and product teams. It keeps the working document in
-              the center, then layers notes, decisions, references, and adversarial review around it.
-            </p>
-          </div>
-          <div class="hero-panel">
-            <h2>Core loop</h2>
-            <ol class="loop-list">
-              <li>Capture a note, prompt, or draft.</li>
-              <li>Run product or engineering review.</li>
-              <li>Accept, reject, or edit the review cards.</li>
-              <li>Rewrite the active document with the useful signal.</li>
-            </ol>
-          </div>
-        </div>
-      </section>
-
-      <section id="what-it-is" class="section">
-        <div class="wrap two-col">
-          <div>
-            <h2>What ARM is</h2>
-            <p>
-              ARM is not a giant workflow system. It is a focused review surface for pressure-testing ideas, PRDs, and
-              technical direction before they get bloated or quietly drift.
-            </p>
-          </div>
-          <div class="note-block">
-            <h3>Designed for</h3>
-            <ul>
-              <li>technical PMs</li>
-              <li>product leads</li>
-              <li>founders shaping product direction</li>
-              <li>engineering leads reviewing scope and risk</li>
-            </ul>
-          </div>
-        </div>
-      </section>
-
-      <section id="compare" class="section section-alt">
-        <div class="wrap">
-          <h2>BMAD vs. ARM</h2>
-          <p class="section-copy">
-            BMAD is broad and process-heavy. ARM is narrower: review the current document, expose the important gaps,
-            and help the user update the source of truth.
+    <main id="main">
+      <section class="hero section">
+        <div class="wrap narrow">
+          <p class="eyebrow">Local-first product review</p>
+          <h1>Keep one working document sharp.</h1>
+          <p class="lead">
+            ARM helps technical PMs and engineering leads review an idea or PRD without turning it into a long AI essay.
+            It produces small cards, lets you decide what matters, and updates the active document.
           </p>
+        </div>
+      </section>
 
-          <div class="table-wrap">
+      <section id="compare" class="section section-ruled">
+        <div class="wrap">
+          <div class="section-heading">
+            <p class="eyebrow">BMAD vs. ARM</p>
+            <h2>Different jobs, different tools.</h2>
+            <p>
+              BMAD is a broader methodology. ARM is a narrower review surface for keeping the current document useful.
+            </p>
+          </div>
+
+          <div class="table-wrap" role="region" aria-label="BMAD and ARM comparison" tabindex="0">
             <table>
+              <caption>
+                A plain comparison of what BMAD emphasizes compared with ARM.
+              </caption>
               <thead>
                 <tr>
-                  <th>Capability</th>
-                  <th>BMAD</th>
-                  <th>ARM</th>
+                  <th scope="col">Need</th>
+                  <th scope="col">BMAD</th>
+                  <th scope="col">ARM</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>Broad end-to-end methodology</td>
+                  <th scope="row">Broad delivery method</th>
                   <td>Yes</td>
                   <td>No</td>
                 </tr>
                 <tr>
-                  <td>Document-centered review workflow</td>
+                  <th scope="row">Review the active document</th>
                   <td>Partial</td>
                   <td>Yes</td>
                 </tr>
                 <tr>
-                  <td>Small adversarial review cards</td>
+                  <th scope="row">Small review cards</th>
                   <td>No</td>
                   <td>Yes</td>
                 </tr>
                 <tr>
-                  <td>Accept / reject / edit review output</td>
-                  <td>Not the core model</td>
+                  <th scope="row">Accept, reject, or edit output</th>
+                  <td>Not central</td>
                   <td>Yes</td>
                 </tr>
                 <tr>
-                  <td>Living context rewrite</td>
-                  <td>Not the core model</td>
+                  <th scope="row">Product and engineering personas</th>
+                  <td>Varies</td>
                   <td>Yes</td>
                 </tr>
                 <tr>
-                  <td>Local-first desktop storage</td>
+                  <th scope="row">Local project storage</th>
                   <td>No</td>
                   <td>Yes</td>
                 </tr>
                 <tr>
-                  <td>Product review persona</td>
-                  <td>Varies</td>
-                  <td>Yes</td>
-                </tr>
-                <tr>
-                  <td>Engineering review persona</td>
-                  <td>Varies</td>
-                  <td>Yes</td>
-                </tr>
-                <tr>
-                  <td>Built to replace human judgment</td>
+                  <th scope="row">Replace human judgment</th>
                   <td>No</td>
                   <td>No</td>
                 </tr>
@@ -141,20 +107,46 @@
         </div>
       </section>
 
-      <section id="how-it-works" class="section">
-        <div class="wrap three-col">
-          <article class="step-card">
-            <h3>1. Start with a real document</h3>
-            <p>Create an IDEA or PRD document and make that the current working context.</p>
-          </article>
-          <article class="step-card">
-            <h3>2. Add signal around it</h3>
-            <p>Capture notes, decisions, and references without losing the main thread.</p>
-          </article>
-          <article class="step-card">
-            <h3>3. Pressure-test it</h3>
-            <p>Run product and engineering review, then keep only the cards that improve the document.</p>
-          </article>
+      <section id="workflow" class="section">
+        <div class="wrap">
+          <div class="section-heading">
+            <p class="eyebrow">Workflow</p>
+            <h2>The loop is intentionally small.</h2>
+          </div>
+
+          <ol class="steps" aria-label="ARM workflow">
+            <li>
+              <strong>Write or open a document.</strong>
+              <span>The selected document is the context for the review.</span>
+            </li>
+            <li>
+              <strong>Ask for review.</strong>
+              <span>Use chat, product, technical, or combined review.</span>
+            </li>
+            <li>
+              <strong>Work through cards.</strong>
+              <span>Keep useful questions, warnings, and next steps.</span>
+            </li>
+            <li>
+              <strong>Update the document.</strong>
+              <span>Accepted notes and decisions improve the source of truth.</span>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section id="fit" class="section section-ruled">
+        <div class="wrap split">
+          <div>
+            <p class="eyebrow">Good fit</p>
+            <h2>Use ARM when decisions need pressure.</h2>
+          </div>
+          <ul class="plain-list">
+            <li>Early product ideas that need sharper framing.</li>
+            <li>PRDs that need product and engineering review.</li>
+            <li>Technical direction that needs risks surfaced before build.</li>
+            <li>Projects where the context should stay local.</li>
+          </ul>
         </div>
       </section>
     </main>
