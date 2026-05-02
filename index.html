@@ -6,149 +6,142 @@
     <title>ARM - Adversarial Review Module</title>
     <meta
       name="description"
-      content="ARM is a desktop adversarial review module for product documents. It compares directly with BMAD by optimizing for control, correctness, and reviewable decisions instead of large generated documents."
+      content="ARM is a desktop adversarial review tool for product documents. It prioritizes control, correctness, and decision-making over large generated outputs."
     />
     <link rel="stylesheet" href="site.css" />
   </head>
+
   <body>
-    <a class="skip-link" href="#main">Skip to content</a>
+    <main class="wrap narrow">
 
-    <header class="site-header">
-      <div class="wrap header-row">
-        <a class="brand" href="./" aria-label="ARM home">
-          <span class="brand-mark">ARM</span>
-          <span>
-            <span class="brand-title">Adversarial Review Module</span>
-            <span class="brand-subtitle">Desktop critique for product work</span>
-          </span>
-        </a>
+      <!-- WHAT IT IS -->
+      <section class="section">
+        <h1>ARM</h1>
+        <p><strong>Adversarial Review Module</strong></p>
 
-        <nav class="site-nav" aria-label="Primary navigation">
-          <a href="#what">What it is</a>
-          <a href="#bmad">ARM vs BMAD</a>
-          <a href="#start">Start</a>
-        </nav>
-      </div>
-    </header>
+        <p>
+          ARM is a local desktop application (Windows, macOS, Linux) for reviewing
+          product ideas, PRDs, RFCs, and plans before code is written.
+        </p>
 
-    <main id="main">
-      <section id="what" class="hero section">
-        <div class="wrap narrow">
-          <p class="eyebrow">ARM</p>
-          <h1>Adversarial review for product decisions.</h1>
-          <p class="lead">
-            ARM is a local desktop application for Windows, macOS, and Linux. It reviews product ideas, PRDs,
-            RFCs, and plans before code is written.
-          </p>
-          <p>
-            ARM does not generate giant documents. It works against the document you already have and returns
-            small critique cards: risks, contradictions, questions, scope cuts, actions, and decision candidates.
-          </p>
-          <p>
-            You accept, reject, or edit each card. Changes stay explicit, reviewable, and user-approved.
-          </p>
-          <div class="hero-actions" aria-label="Project links">
-            <a class="button button-primary" href="https://github.com/BranchPointLabs/arm-adversarial-review-module">
-              View GitHub repo
-            </a>
-            <a class="button button-secondary" href="https://github.com/BranchPointLabs/arm-adversarial-review-module/blob/main/README.md">
-              Read setup instructions
-            </a>
-          </div>
-        </div>
+        <p>
+          It does not generate documents. It applies pressure to the document you
+          already have using small critique cards:
+          risks, contradictions, gaps, questions, and decisions.
+        </p>
+
+        <p>
+          You accept, reject, or edit each card. Nothing changes unless you approve it.
+        </p>
+
+        <p>
+          <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module">
+            → View repository
+          </a><br />
+          <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module/blob/main/README.md">
+            → Setup instructions
+          </a>
+        </p>
       </section>
 
-      <section id="bmad" class="section section-ruled">
-        <div class="wrap">
-          <div class="section-heading">
-            <p class="eyebrow">ARM vs BMAD</p>
-            <h2>BMAD optimizes for generated output. ARM optimizes for controlled review.</h2>
-          </div>
+      <!-- BMAD VS ARM -->
+      <section class="section">
+        <h2>BMAD vs ARM</h2>
 
-          <div class="table-scroll" role="region" aria-label="ARM versus BMAD comparison" tabindex="0">
-            <table class="comparison-table">
-              <thead>
-                <tr>
-                  <th scope="col">Area</th>
-                  <th scope="col">BMAD</th>
-                  <th scope="col">ARM</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th scope="row">Main job</th>
-                  <td>Generate large project artifacts through role-based workflows.</td>
-                  <td>Review existing documents through small, focused critique cards.</td>
-                </tr>
-                <tr>
-                  <th scope="row">Document model</th>
-                  <td>Requires documentation to become comprehensive enough to drive the workflow.</td>
-                  <td>Works against the document you already have and pressures the parts that matter.</td>
-                </tr>
-                <tr>
-                  <th scope="row">Output size</th>
-                  <td>Produces enough text that reading, evaluating, and reconciling the output becomes its own task.</td>
-                  <td>Produces concise cards that can be accepted, rejected, edited, or ignored.</td>
-                </tr>
-                <tr>
-                  <th scope="row">Risk</th>
-                  <td>Long outputs can miss key flows, bury weak assumptions, or hide contradictions inside polished prose.</td>
-                  <td>Surfaces risks, gaps, contradictions, and open questions directly.</td>
-                </tr>
-                <tr>
-                  <th scope="row">Change control</th>
-                  <td>Regeneration can introduce subtle wording changes, meaning changes, or new requirements that are hard to catch.</td>
-                  <td>Every proposed change is explicit and requires user approval before it affects the document.</td>
-                </tr>
-                <tr>
-                  <th scope="row">SDLC maintenance</th>
-                  <td>Document generation is fast, but maintaining decisions, notes, open questions, and project truth is not the core flow.</td>
-                  <td>Supports decisions, notes, open questions, accepted cards, and controlled document updates as first-class workflow pieces.</td>
-                </tr>
-                <tr>
-                  <th scope="row">Auditability</th>
-                  <td>High maintenance burden, low auditability: the user must meticulously check large documents for inaccuracies.</td>
-                  <td>Smaller review units create a clearer trail of what was challenged, accepted, rejected, or changed.</td>
-                </tr>
-                <tr>
-                  <th scope="row">Optimization</th>
-                  <td>Optimizes for speed, coverage, and output.</td>
-                  <td>Optimizes for direction, control, correctness, and human judgment.</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <table class="comparison-table">
+          <thead>
+            <tr>
+              <th>Behavior</th>
+              <th>BMAD</th>
+              <th>ARM</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Generates large documents</td>
+              <td>✓</td>
+              <td>✗</td>
+            </tr>
+            <tr>
+              <td>Produces small critique units</td>
+              <td>✗</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>Requires comprehensive docs</td>
+              <td>✓</td>
+              <td>✗</td>
+            </tr>
+            <tr>
+              <td>Works on existing document</td>
+              <td>✗</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>High output volume</td>
+              <td>✓</td>
+              <td>✗</td>
+            </tr>
+            <tr>
+              <td>Easy to review output</td>
+              <td>✗</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>Can hide risks in long text</td>
+              <td>✓</td>
+              <td>✗</td>
+            </tr>
+            <tr>
+              <td>Explicit, user-approved changes</td>
+              <td>✗</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>Tracks decisions / questions</td>
+              <td>✗</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>High auditability</td>
+              <td>✗</td>
+              <td>✓</td>
+            </tr>
+            <tr>
+              <td>Optimized for output</td>
+              <td>✓</td>
+              <td>✗</td>
+            </tr>
+            <tr>
+              <td>Optimized for control</td>
+              <td>✗</td>
+              <td>✓</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p><strong>BMAD writes more. ARM makes decisions clearer.</strong></p>
       </section>
 
-      <section id="start" class="section section-final">
-        <div class="wrap narrow">
-          <p class="eyebrow">Start locally</p>
-          <h2>Clone ARM and run the desktop app.</h2>
-          <p>
-            Full setup instructions are in the
-            <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module/blob/main/README.md">README</a>.
-          </p>
+      <!-- GET STARTED -->
+      <section class="section">
+        <h2>Get started</h2>
 
-          <div class="command-block">
-            <h3>1. Clone the repository</h3>
-            <pre><code>git clone https://github.com/BranchPointLabs/arm-adversarial-review-module.git
+        <p>Clone the repo and run locally.</p>
+
+        <pre><code>git clone https://github.com/BranchPointLabs/arm-adversarial-review-module.git
 cd arm-adversarial-review-module/arm
 npm install</code></pre>
-          </div>
 
-          <div class="command-block">
-            <h3>2. Run ARM locally</h3>
-            <pre><code>npm run tauri dev</code></pre>
-          </div>
+        <p>Run the app:</p>
 
-          <div class="command-block">
-            <h3>3. Build a desktop application</h3>
-            <p>Run this on the platform you want to package for: Windows, macOS, or Linux.</p>
-            <pre><code>npm run tauri build</code></pre>
-          </div>
-        </div>
+        <pre><code>npm run tauri dev</code></pre>
+
+        <p>Build a desktop app (Windows / macOS / Linux):</p>
+
+        <pre><code>npm run tauri build</code></pre>
       </section>
+
     </main>
   </body>
 </html>
