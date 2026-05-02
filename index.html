@@ -279,6 +279,63 @@
         color: inherit;
         text-decoration: underline;
       }
+      .site-footer {
+  margin-top: 64px;
+  padding: 20px 0;
+  border-top: 1px solid #e5e5e5;
+  font-size: 14px;
+}
+
+.footer-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.footer-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+
+.footer-tagline {
+  color: #666;
+}
+
+.footer-center a,
+.footer-right a {
+  margin-left: 16px;
+  text-decoration: none;
+  color: #444;
+}
+
+.footer-center a:hover,
+.footer-right a:hover {
+  text-decoration: underline;
+}
+
+.footer-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #666;
+}
+
+/* Mobile */
+@media (max-width: 800px) {
+  .footer-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .footer-center a {
+    margin-left: 0;
+    margin-right: 12px;
+  }
+}
       @media (max-width: 960px) {
         .hero-split { grid-template-columns: 1fr; }
         .hero-copy { max-width: none; }
@@ -497,14 +554,30 @@ npm install</code></pre>
         </div>
       </section>
     </main>
-    <footer class="site-footer">
-  <div class="wrap narrow">
-    <p>
-      Built by
-      <a href="https://github.com/CarltonBranch" target="_blank" rel="noopener">
-        CarltonBranch
+   <footer class="site-footer">
+  <div class="wrap footer-inner">
+
+    <div class="footer-left">
+      <span class="brand-mark">ARM</span>
+      <span class="footer-tagline">Adversarial review for product documents</span>
+    </div>
+
+    <div class="footer-center">
+      <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module">
+        Repository
       </a>
-    </p>
+      <a href="https://github.com/BranchPointLabs/arm-adversarial-review-module/blob/main/README.md">
+        Setup
+      </a>
+    </div>
+
+    <div class="footer-right">
+      <span>Made in Canada · 2026</span>
+      <a href="https://github.com/CarltonBranch" target="_blank" rel="noopener">
+        @CarltonBranch
+      </a>
+    </div>
+
   </div>
 </footer>
   </body>
