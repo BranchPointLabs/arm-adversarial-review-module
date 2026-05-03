@@ -1,4 +1,3 @@
-import { browserProjectStore } from "./browserProjectStore";
 import { isTauriRuntimeAvailable, tauriProjectStore } from "./tauriProjectStore";
 
 export type {
@@ -14,6 +13,9 @@ export type {
   ProjectDocument,
   ProjectReference,
   ProjectStore,
+  RetrievedMemoryChunk,
 } from "./types";
 
-export const projectStore = isTauriRuntimeAvailable() ? tauriProjectStore : browserProjectStore;
+export { isTauriRuntimeAvailable } from "./tauriProjectStore";
+
+export const projectStore = tauriProjectStore;

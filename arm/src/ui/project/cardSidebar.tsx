@@ -36,6 +36,11 @@ export function SidebarItemView(props: {
       </div>
       <div className="reviewCardTitle">{card.title}</div>
       <div className="reviewCardBody">{card.body}</div>
+      {card.sourceDocumentTitle ? (
+        <div className="reviewCardSource">
+          Source: {card.sourceDocumentTitle}{card.sourceSectionTitle ? ` > ${card.sourceSectionTitle}` : ""}
+        </div>
+      ) : null}
       {card.proposedUpdate ? <div className="reviewCardUpdate">{card.proposedUpdate}</div> : null}
       <div className="reviewCardActions">
         <button type="button" className="secondary" onClick={() => props.onAccept(card)}>

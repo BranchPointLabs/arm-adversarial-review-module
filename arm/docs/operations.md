@@ -9,26 +9,6 @@ For local development:
 - Rust
 - Cargo
 
-## Launching the browser preview
-
-From:
-
-`C:\Users\clbra\OneDrive\Desktop\arm-adversarial-review-module\arm`
-
-Run:
-
-```powershell
-npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-Use this for:
-
-- frontend styling
-- layout iteration
-- basic UI smoke checks
-
-Do not use this mode to validate true desktop persistence behavior.
-
 ## Launching the desktop app
 
 From:
@@ -91,7 +71,7 @@ You can be productive here without being a Rust expert.
 Start with this mental model:
 
 1. React renders the app and manages interaction
-2. `projectStore` decides whether the runtime is browser or desktop
+2. `projectStore` talks to the Tauri-backed desktop store
 3. Tauri commands bridge the UI to local persistence
 4. Rust stores the durable state in SQLite and filesystem mirrors
 
@@ -99,4 +79,5 @@ When debugging:
 
 - if the UI looks wrong, start in `src/ui/`
 - if data does not persist in desktop mode, inspect `src-tauri/src/main.rs`
-- if browser preview works but desktop does not, inspect `tauriProjectStore.ts` and Tauri command names
+- if the browser shows only a desktop-required screen, that is expected
+- if desktop calls fail, inspect `tauriProjectStore.ts` and Tauri command names

@@ -77,20 +77,16 @@ Current Rust tests are light. They mostly validate schema initialization and a h
 4. apply draft
 5. confirm selected document was rewritten
 
-## Browser-preview smoke checks
+## Desktop-only reminder
 
-Browser preview should still be checked for:
+The browser is no longer a supported application runtime.
 
-- layout
-- navigation
-- modal behavior
-- optimistic UX
+Run smoke checks in the Tauri desktop window for:
 
-But not for:
-
-- true local filesystem behavior
+- local filesystem behavior
 - Tauri command correctness
 - desktop base-directory resolution
+- realistic project persistence
 
 ## Testing gaps
 

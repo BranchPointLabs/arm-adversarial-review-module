@@ -23,7 +23,6 @@ The current build supports:
 
 - creating and selecting projects
 - storing data locally in SQLite for the desktop app
-- storing preview data in `localStorage` for the browser-only preview
 - editing `CURRENT_CONTEXT.md`
 - creating typed documents (`IDEA` and `PRD`)
 - capturing chat notes
@@ -69,8 +68,6 @@ Important files:
   product review persona
 - `src/core/eng.md`
   engineering review persona
-- `src/core/browserProjectStore.ts`
-  browser preview storage
 - `src/core/tauriProjectStore.ts`
   desktop IPC bridge to Rust
 
@@ -116,26 +113,7 @@ SQLite tables currently include:
 - `agent_cards`
 - `current_context`
 
-## Desktop app vs browser preview
-
-There are two ways to view the UI:
-
-### Browser preview
-
-```powershell
-cd arm
-npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-This opens the React app in a normal browser. It is useful for quick UI work.
-
-In browser preview mode:
-
-- data is stored in `localStorage`
-- there is no native desktop shell
-- there is no Rust runtime
-
-### Desktop app
+## Desktop app
 
 ```powershell
 cd arm
@@ -149,9 +127,8 @@ In desktop mode:
 
 - React still renders the UI
 - Rust handles persistence and local files
-- SQLite is used instead of `localStorage`
-
-If you want to test real desktop persistence behavior, always use the Tauri window.
+- SQLite stores durable state
+- the browser view is intentionally disabled
 
 ## First-time setup
 
@@ -201,14 +178,11 @@ Launches the desktop app.
 ## How to use the app
 
 1. Create a project from `Projects -> New Project...`
-2. Open `Current Context`
-3. Use the bottom bar in `chat` mode to capture rough notes
-4. Add explicit decisions with `Add Decision`
-5. Add files or folders in `References`
-6. Switch the bottom bar to a review mode and submit a prompt
-7. Accept, reject, or edit the cards in the right rail
-8. Click `Update Context`
-9. Review the replacement draft and apply it
+2. Create a document and select it as the active context
+3. Use the bottom bar in `chat`, `product`, `technical`, or `everything`
+4. Add explicit decisions and references as needed
+5. Accept or dismiss cards in the right rail
+6. Resolve accepted cards into patches, decisions, or open questions
 
 ## LLM settings
 

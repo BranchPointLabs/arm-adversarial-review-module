@@ -11,8 +11,7 @@ Flow:
 1. user enters a project name
 2. app creates the project through `projectStore.createProject`
 3. desktop mode creates a real folder and SQLite database
-4. browser preview mode creates an in-browser project record
-5. app navigates to the new project workspace
+4. app navigates to the new project workspace
 
 ## 2. Select a project
 

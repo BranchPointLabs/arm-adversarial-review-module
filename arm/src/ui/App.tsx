@@ -9,7 +9,7 @@ import {
   saveApiKey,
   saveLlmSettings,
 } from "../core/llmSettings";
-import { projectStore, Project } from "../core/projectStore";
+import { isTauriRuntimeAvailable, projectStore, Project } from "../core/projectStore";
 import ProjectWorkspace from "./project/ProjectWorkspace";
 import ProjectHome from "./screens/ProjectHome";
 import Menu from "./shared/Menu";
@@ -17,6 +17,7 @@ import Modal from "./shared/Modal";
 
 export default function App() {
   const navigate = useNavigate();
+  const desktopRuntimeReady = isTauriRuntimeAvailable();
 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createName, setCreateName] = React.useState("");
@@ -138,6 +139,41 @@ export default function App() {
     } finally {
       setSettingsBusy(false);
     }
+  }
+
+  if (!desktopRuntimeReady) {
+    return (
+      <div className="shell">
+        <header className="topbar">
+          <div className="topbarInner">
+            <button type="button" className="brandButton" onClick={() => navigate("/")}>
+              <div className="brand">
+                <div className="brandMark">ARM</div>
+                <div>
+                  <div className="brandTitle">ARM</div>
+                  <div className="brandSub">Adversarial Review Module</div>
+                </div>
+              </div>
+            </button>
+          </div>
+        </header>
+
+        <main className="desktopOnlyState">
+          <div className="desktopOnlyCard">
+            <div className="landingEyebrow">Desktop App Required</div>
+            <h1>ARM runs in the Tauri desktop app.</h1>
+            <p>
+              This browser view is no longer supported. ARM uses the Rust backend, local project
+              folders, SQLite, and desktop file access for its real workflow.
+            </p>
+            <div className="desktopOnlyCommand">cd arm{"\n"}npm run tauri dev</div>
+            <p className="desktopOnlyHint">
+              Launch the command above, then use the ARM desktop window instead of this browser tab.
+            </p>
+          </div>
+        </main>
+      </div>
+    );
   }
 
   return (

@@ -33,21 +33,9 @@ Desktop mode:
 - `arm.db` SQLite database
 - `CURRENT_CONTEXT.md` on disk
 
-Browser preview mode:
-
-- `localStorage`
-- no native filesystem integration
-
 ## Important implementation note
 
-The app supports both browser preview and Tauri desktop mode through the same `projectStore` interface.
-
-- `browserProjectStore.ts`
-  preview mode
-- `tauriProjectStore.ts`
-  desktop mode
-
-This keeps the UI mostly independent from the storage backend.
+The app talks to the Tauri-backed `projectStore` interface for all project persistence.
 
 ## Review system state
 

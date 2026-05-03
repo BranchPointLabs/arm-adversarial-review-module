@@ -6,7 +6,6 @@
   "scripts": {
     "dev": "vite",
     "build": "node ./node_modules/typescript/bin/tsc -b && node ./node_modules/vite/bin/vite.js build",
-    "preview": "vite preview",
     "tauri": "tauri",
     "tauri dev": "tauri dev",
     "tauri build": "tauri build"

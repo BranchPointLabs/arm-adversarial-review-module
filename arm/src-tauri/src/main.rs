@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::path::BaseDirectory;
 use tauri::{command, Manager};
@@ -73,6 +73,17 @@ struct ProjectReference {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct RetrievedMemoryChunk {
+  chunk_id: String,
+  document_title: String,
+  section_title: Option<String>,
+  text: String,
+  similarity: f32,
+  source_kind: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AgentCard {
   id: String,
   project_id: String,
@@ -85,6 +96,8 @@ struct AgentCard {
   proposed_update: Option<String>,
   target_section: Option<String>,
   source_agent: String,
+  source_document_title: Option<String>,
+  source_section_title: Option<String>,
   created_at: String,
 }
 
@@ -115,6 +128,8 @@ struct NewAgentCardInput {
   proposed_update: Option<String>,
   target_section: Option<String>,
   source_agent: String,
+  source_document_title: Option<String>,
+  source_section_title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,6 +140,40 @@ struct AgentCardPatch {
   body: Option<String>,
   proposed_update: Option<String>,
   target_section: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum MemorySourceKind {
+  Document,
+  Reference,
+  Decision,
+}
+
+impl MemorySourceKind {
+  fn as_str(self) -> &'static str {
+    match self {
+      MemorySourceKind::Document => "document",
+      MemorySourceKind::Reference => "reference",
+      MemorySourceKind::Decision => "decision",
+    }
+  }
+}
+
+#[derive(Debug, Clone)]
+struct MemoryDocumentRow {
+  id: String,
+  content_hash: String,
+}
+
+#[derive(Debug, Clone)]
+struct MemoryChunkRow {
+  chunk_id: String,
+  document_title: String,
+  section_title: Option<String>,
+  text: String,
+  source_kind: String,
+  source_ref_id: String,
+  vector: Vec<f32>,
 }
 
 #[command]
@@ -291,6 +340,7 @@ fn save_document(project_path: String, document_id: String, markdown: String) ->
     )
     .map_err(to_err)?;
   touch_project(&conn, &now).map_err(to_err)?;
+  schedule_memory_reindex(project_path, MemorySourceKind::Document, document_id);
   Ok(())
 }
 
@@ -368,6 +418,7 @@ fn add_decision(project_path: String, text: String, reason: Option<String>) -> R
     )
     .map_err(to_err)?;
   touch_project(&conn, &now).map_err(to_err)?;
+  schedule_memory_reindex(project_path.clone(), MemorySourceKind::Decision, id.clone());
 
   Ok(Decision {
     id,
@@ -469,6 +520,9 @@ fn add_references(project_path: String, references: Vec<NewReferenceInput>) -> R
   }
 
   touch_project(&conn, &now).map_err(to_err)?;
+  for reference in &created {
+    schedule_memory_reindex(project_path.clone(), MemorySourceKind::Reference, reference.id.clone());
+  }
   Ok(created)
 }
 
@@ -478,6 +532,7 @@ fn update_reference(project_path: String, reference_id: String, patch: Reference
   let conn = open_project_conn(&project_path)?;
   let current = load_reference(&conn, &reference_id)?;
 
+  let should_reindex = patch.summary.is_some() || patch.extracted_text.is_some();
   let summary = patch.summary.or(current.summary);
   let extracted_text = patch.extracted_text.or(current.extracted_text);
   let is_selected = patch.is_selected.unwrap_or(current.is_selected);
@@ -489,6 +544,9 @@ fn update_reference(project_path: String, reference_id: String, patch: Reference
     .map_err(to_err)?;
   let now = Utc::now().to_rfc3339();
   touch_project(&conn, &now).map_err(to_err)?;
+  if should_reindex {
+    schedule_memory_reindex(project_path.clone(), MemorySourceKind::Reference, reference_id.clone());
+  }
   load_reference(&conn, &reference_id)
 }
 
@@ -499,9 +557,51 @@ fn remove_reference(project_path: String, reference_id: String) -> Result<(), St
   conn
     .execute("DELETE FROM project_references WHERE id=?1", params![reference_id])
     .map_err(to_err)?;
+  remove_memory_document(&conn, MemorySourceKind::Reference, &reference_id).map_err(to_err)?;
   let now = Utc::now().to_rfc3339();
   touch_project(&conn, &now).map_err(to_err)?;
   Ok(())
+}
+
+#[command]
+fn retrieve_memory_context(
+  project_path: String,
+  active_document_id: Option<String>,
+  current_document_markdown: String,
+  focus_line: String,
+  agent_type: String,
+  limit: Option<usize>,
+) -> Result<Vec<RetrievedMemoryChunk>, String> {
+  let project_path = PathBuf::from(project_path);
+  let conn = open_project_conn(&project_path)?;
+  ensure_project_memory_indexed(&project_path, &conn).map_err(to_err)?;
+
+  let capped_limit = limit.unwrap_or(5).clamp(1, 8);
+  let query = build_memory_query(&current_document_markdown, &focus_line, &agent_type);
+  let results = search_memory(
+    &conn,
+    &query,
+    active_document_id.as_deref(),
+    capped_limit,
+  )
+  .map_err(to_err)?;
+
+  if !results.is_empty() {
+    let scores = results
+      .iter()
+      .map(|item| format!("{:.3}", item.similarity))
+      .collect::<Vec<_>>()
+      .join(", ");
+    println!(
+      "[arm-memory] retrieved={} scores=[{}] agent={} focus={}",
+      results.len(),
+      scores,
+      agent_type,
+      truncate_log_line(&focus_line, 120)
+    );
+  }
+
+  Ok(results)
 }
 
 #[command]
@@ -511,7 +611,7 @@ fn list_agent_cards(project_path: String) -> Result<Vec<AgentCard>, String> {
 
   let mut stmt = conn
     .prepare(
-      "SELECT id, project_id, run_id, type, status, title, body, proposed_update, target_section, source_agent, created_at
+      "SELECT id, project_id, run_id, type, status, title, body, proposed_update, target_section, source_agent, source_document_title, source_section_title, created_at
        FROM agent_cards
        ORDER BY created_at DESC",
     )
@@ -547,8 +647,8 @@ fn create_agent_cards(project_path: String, source_agent: String, cards: Vec<New
     let id = Uuid::new_v4().to_string();
     conn
       .execute(
-        "INSERT INTO agent_cards (id, project_id, run_id, type, status, title, body, proposed_update, target_section, source_agent, created_at)
-         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8, ?9, ?10)",
+        "INSERT INTO agent_cards (id, project_id, run_id, type, status, title, body, proposed_update, target_section, source_agent, source_document_title, source_section_title, created_at)
+         VALUES (?1, ?2, ?3, ?4, 'pending', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
         params![
           id,
           project_id,
@@ -559,6 +659,8 @@ fn create_agent_cards(project_path: String, source_agent: String, cards: Vec<New
           card.proposed_update,
           card.target_section,
           card.source_agent,
+          card.source_document_title,
+          card.source_section_title,
           now
         ],
       )
@@ -575,6 +677,8 @@ fn create_agent_cards(project_path: String, source_agent: String, cards: Vec<New
       proposed_update: card.proposed_update,
       target_section: card.target_section,
       source_agent: card.source_agent,
+      source_document_title: card.source_document_title,
+      source_section_title: card.source_section_title,
       created_at: now.clone(),
     });
   }
@@ -683,7 +787,33 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
       proposed_update TEXT,
       target_section TEXT,
       source_agent TEXT,
+      source_document_title TEXT,
+      source_section_title TEXT,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL,
+      source_ref_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      content_hash TEXT NOT NULL,
+      UNIQUE(source_kind, source_ref_id)
+    );
+    CREATE TABLE IF NOT EXISTS chunks (
+      id TEXT PRIMARY KEY,
+      memory_document_id TEXT NOT NULL,
+      project_id TEXT NOT NULL,
+      chunk_index INTEGER NOT NULL,
+      section_title TEXT,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS embeddings (
+      chunk_id TEXT PRIMARY KEY,
+      vector TEXT NOT NULL
     );
     "#,
   )?;
@@ -700,6 +830,15 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
       [],
     );
   }
+
+  let _ = conn.execute(
+    "ALTER TABLE agent_cards ADD COLUMN source_document_title TEXT",
+    [],
+  );
+  let _ = conn.execute(
+    "ALTER TABLE agent_cards ADD COLUMN source_section_title TEXT",
+    [],
+  );
 
   Ok(())
 }
@@ -759,7 +898,7 @@ fn load_reference(conn: &Connection, reference_id: &str) -> Result<ProjectRefere
 fn load_agent_card(conn: &Connection, card_id: &str) -> Result<AgentCard, String> {
   conn
     .query_row(
-      "SELECT id, project_id, run_id, type, status, title, body, proposed_update, target_section, source_agent, created_at
+      "SELECT id, project_id, run_id, type, status, title, body, proposed_update, target_section, source_agent, source_document_title, source_section_title, created_at
        FROM agent_cards WHERE id=?1",
       params![card_id],
       map_agent_card,
@@ -804,8 +943,536 @@ fn map_agent_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentCard> {
     proposed_update: row.get(7)?,
     target_section: row.get(8)?,
     source_agent: row.get(9)?,
-    created_at: row.get(10)?,
+    source_document_title: row.get(10)?,
+    source_section_title: row.get(11)?,
+    created_at: row.get(12)?,
   })
+}
+
+fn schedule_memory_reindex(project_path: PathBuf, source_kind: MemorySourceKind, source_ref_id: String) {
+  std::thread::spawn(move || {
+    let result = (|| -> Result<(), String> {
+      let conn = open_project_conn(&project_path)?;
+      reindex_memory_document(&conn, source_kind, &source_ref_id).map_err(to_err)
+    })();
+
+    if let Err(error) = result {
+      eprintln!(
+        "[arm-memory] reindex failed kind={} ref={} error={}",
+        source_kind.as_str(),
+        source_ref_id,
+        error
+      );
+    }
+  });
+}
+
+fn ensure_project_memory_indexed(project_path: &Path, conn: &Connection) -> rusqlite::Result<()> {
+  let mut doc_stmt = conn.prepare(
+    "SELECT id FROM documents",
+  )?;
+  let document_ids = doc_stmt
+    .query_map([], |row| row.get::<_, String>(0))?
+    .filter_map(Result::ok)
+    .collect::<Vec<_>>();
+  for document_id in document_ids {
+    reindex_memory_document(conn, MemorySourceKind::Document, &document_id)?;
+  }
+
+  let mut ref_stmt = conn.prepare("SELECT id FROM project_references")?;
+  let reference_ids = ref_stmt
+    .query_map([], |row| row.get::<_, String>(0))?
+    .filter_map(Result::ok)
+    .collect::<Vec<_>>();
+  for reference_id in reference_ids {
+    reindex_memory_document(conn, MemorySourceKind::Reference, &reference_id)?;
+  }
+
+  let mut decision_stmt = conn.prepare("SELECT id FROM decisions")?;
+  let decision_ids = decision_stmt
+    .query_map([], |row| row.get::<_, String>(0))?
+    .filter_map(Result::ok)
+    .collect::<Vec<_>>();
+  for decision_id in decision_ids {
+    reindex_memory_document(conn, MemorySourceKind::Decision, &decision_id)?;
+  }
+
+  let _ = project_path;
+  Ok(())
+}
+
+fn reindex_memory_document(conn: &Connection, source_kind: MemorySourceKind, source_ref_id: &str) -> rusqlite::Result<()> {
+  let Some((project_id, title, content, updated_at)) = load_memory_source(conn, source_kind, source_ref_id)? else {
+    remove_memory_document(conn, source_kind, source_ref_id)?;
+    return Ok(());
+  };
+
+  let normalized_content = content.trim();
+  if normalized_content.is_empty() {
+    remove_memory_document(conn, source_kind, source_ref_id)?;
+    return Ok(());
+  }
+
+  let content_hash = stable_text_hash(normalized_content);
+  let existing = load_memory_document(conn, source_kind, source_ref_id)?;
+  if let Some(current) = existing.as_ref() {
+    if current.content_hash == content_hash {
+      return Ok(());
+    }
+  }
+
+  let memory_document_id = existing
+    .as_ref()
+    .map(|row| row.id.clone())
+    .unwrap_or_else(|| Uuid::new_v4().to_string());
+
+  if existing.is_some() {
+    conn.execute(
+      "UPDATE memory_documents SET title=?1, updated_at=?2, content_hash=?3 WHERE id=?4",
+      params![title, updated_at, content_hash, memory_document_id],
+    )?;
+  } else {
+    conn.execute(
+      "INSERT INTO memory_documents (id, project_id, source_kind, source_ref_id, title, updated_at, content_hash)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+      params![memory_document_id, project_id, source_kind.as_str(), source_ref_id, title, updated_at, content_hash],
+    )?;
+  }
+
+  replace_memory_chunks(conn, &memory_document_id, &project_id, &title, normalized_content, &updated_at)?;
+  Ok(())
+}
+
+fn load_memory_source(
+  conn: &Connection,
+  source_kind: MemorySourceKind,
+  source_ref_id: &str,
+) -> rusqlite::Result<Option<(String, String, String, String)>> {
+  match source_kind {
+    MemorySourceKind::Document => conn
+      .query_row(
+        "SELECT project_id, name, markdown, updated_at FROM documents WHERE id=?1",
+        params![source_ref_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+      )
+      .optional(),
+    MemorySourceKind::Reference => conn
+      .query_row(
+        "SELECT project_id, file_name, COALESCE(extracted_text, summary, ''), created_at FROM project_references WHERE id=?1",
+        params![source_ref_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+      )
+      .optional(),
+    MemorySourceKind::Decision => conn
+      .query_row(
+        "SELECT project_id, text, COALESCE(text, '') || CASE WHEN reason IS NOT NULL AND reason <> '' THEN '\n\nReason: ' || reason ELSE '' END, created_at FROM decisions WHERE id=?1",
+        params![source_ref_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+      )
+      .optional(),
+  }
+}
+
+fn load_memory_document(
+  conn: &Connection,
+  source_kind: MemorySourceKind,
+  source_ref_id: &str,
+) -> rusqlite::Result<Option<MemoryDocumentRow>> {
+  conn
+    .query_row(
+      "SELECT id, project_id, source_kind, source_ref_id, title, updated_at, content_hash
+       FROM memory_documents WHERE source_kind=?1 AND source_ref_id=?2",
+      params![source_kind.as_str(), source_ref_id],
+      |row| {
+        Ok(MemoryDocumentRow {
+          id: row.get(0)?,
+          content_hash: row.get(6)?,
+        })
+      },
+    )
+    .optional()
+}
+
+fn replace_memory_chunks(
+  conn: &Connection,
+  memory_document_id: &str,
+  project_id: &str,
+  title: &str,
+  content: &str,
+  updated_at: &str,
+) -> rusqlite::Result<()> {
+  let chunk_ids = conn
+    .prepare("SELECT id FROM chunks WHERE memory_document_id=?1")?
+    .query_map(params![memory_document_id], |row| row.get::<_, String>(0))?
+    .filter_map(Result::ok)
+    .collect::<Vec<_>>();
+
+  for chunk_id in &chunk_ids {
+    conn.execute("DELETE FROM embeddings WHERE chunk_id=?1", params![chunk_id])?;
+  }
+  conn.execute("DELETE FROM chunks WHERE memory_document_id=?1", params![memory_document_id])?;
+
+  let chunks = chunk_markdown(title, content);
+  for (index, chunk) in chunks.into_iter().enumerate() {
+    let chunk_id = Uuid::new_v4().to_string();
+    conn.execute(
+      "INSERT INTO chunks (id, memory_document_id, project_id, chunk_index, section_title, text, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+      params![
+        chunk_id,
+        memory_document_id,
+        project_id,
+        index as i64,
+        chunk.0,
+        chunk.1,
+        updated_at,
+        updated_at,
+      ],
+    )?;
+    let vector_json = serde_json::to_string(&embed_text(&chunk.1))
+      .unwrap_or_else(|_| "[]".to_string());
+    conn.execute(
+      "INSERT INTO embeddings (chunk_id, vector) VALUES (?1, ?2)",
+      params![chunk_id, vector_json],
+    )?;
+  }
+
+  Ok(())
+}
+
+fn remove_memory_document(conn: &Connection, source_kind: MemorySourceKind, source_ref_id: &str) -> rusqlite::Result<()> {
+  let memory_document = load_memory_document(conn, source_kind, source_ref_id)?;
+  if let Some(row) = memory_document {
+    let chunk_ids = conn
+      .prepare("SELECT id FROM chunks WHERE memory_document_id=?1")?
+      .query_map(params![row.id.clone()], |chunk_row| chunk_row.get::<_, String>(0))?
+      .filter_map(Result::ok)
+      .collect::<Vec<_>>();
+    for chunk_id in &chunk_ids {
+      conn.execute("DELETE FROM embeddings WHERE chunk_id=?1", params![chunk_id])?;
+    }
+    conn.execute("DELETE FROM chunks WHERE memory_document_id=?1", params![row.id.clone()])?;
+    conn.execute("DELETE FROM memory_documents WHERE id=?1", params![row.id])?;
+  }
+  Ok(())
+}
+
+fn search_memory(
+  conn: &Connection,
+  query: &str,
+  active_document_id: Option<&str>,
+  limit: usize,
+) -> rusqlite::Result<Vec<RetrievedMemoryChunk>> {
+  let query_vector = embed_text(query);
+  let mut stmt = conn.prepare(
+    "SELECT chunks.id, memory_documents.title, chunks.section_title, chunks.text, memory_documents.source_kind, memory_documents.source_ref_id, embeddings.vector
+     FROM chunks
+     JOIN memory_documents ON memory_documents.id = chunks.memory_document_id
+     JOIN embeddings ON embeddings.chunk_id = chunks.id
+     WHERE chunks.project_id = memory_documents.project_id",
+  )?;
+
+  let rows = stmt.query_map([], |row| {
+    let vector_json: String = row.get(6)?;
+    let vector = parse_vector_json(&vector_json);
+    Ok(MemoryChunkRow {
+      chunk_id: row.get(0)?,
+      document_title: row.get(1)?,
+      section_title: row.get(2)?,
+      text: row.get(3)?,
+      source_kind: row.get(4)?,
+      source_ref_id: row.get(5)?,
+      vector,
+    })
+  })?;
+
+  let mut scored = rows
+    .filter_map(Result::ok)
+    .filter(|row| !(row.source_kind == "document" && active_document_id.is_some() && Some(row.source_ref_id.as_str()) == active_document_id))
+    .map(|row| {
+      let similarity = cosine_similarity(&query_vector, &row.vector);
+      (row, similarity)
+    })
+    .collect::<Vec<_>>();
+
+  scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+  Ok(
+    scored
+      .into_iter()
+      .take(limit)
+      .map(|(row, similarity)| RetrievedMemoryChunk {
+        chunk_id: row.chunk_id,
+        document_title: row.document_title,
+        section_title: row.section_title,
+        text: truncate_log_line(&row.text, 900),
+        similarity,
+        source_kind: row.source_kind,
+      })
+      .collect(),
+  )
+}
+
+fn build_memory_query(current_document_markdown: &str, focus_line: &str, agent_type: &str) -> String {
+  let agent_hint = match agent_type {
+    "product" => "Focus on product risk, user value, scope, and decision quality.",
+    "technical" => "Focus on technical risk, implementation constraints, architecture, and operational failure modes.",
+    _ => "Focus on contradictions, risks, open questions, and next steps.",
+  };
+
+  format!(
+    "[Document Summary]\n{}\n\n[Focus Line]\n{}\n\n[Agent Lens Hint]\n{}",
+    summarize_for_query(current_document_markdown, 1200),
+    focus_line.trim(),
+    agent_hint
+  )
+}
+
+fn summarize_for_query(markdown: &str, max_chars: usize) -> String {
+  let cleaned = markdown
+    .lines()
+    .map(str::trim)
+    .filter(|line| !line.is_empty())
+    .take(24)
+    .collect::<Vec<_>>()
+    .join("\n");
+  truncate_log_line(&cleaned, max_chars)
+}
+
+fn chunk_markdown(title: &str, content: &str) -> Vec<(Option<String>, String)> {
+  let max_tokens = 800usize;
+  let min_tokens = 300usize;
+  let mut sections: Vec<(Option<String>, Vec<String>)> = Vec::new();
+  let mut current_section: Option<String> = Some(title.to_string());
+  let mut current_block: Vec<String> = Vec::new();
+
+  for line in content.lines() {
+    let trimmed = line.trim_end();
+    if let Some(section) = parse_heading(trimmed) {
+      if !current_block.is_empty() {
+        sections.push((current_section.clone(), current_block.clone()));
+        current_block.clear();
+      }
+      current_section = Some(section);
+      continue;
+    }
+
+    if trimmed.is_empty() {
+      if !current_block.is_empty() {
+        sections.push((current_section.clone(), current_block.clone()));
+        current_block.clear();
+      }
+      continue;
+    }
+
+    current_block.push(trimmed.to_string());
+  }
+
+  if !current_block.is_empty() {
+    sections.push((current_section.clone(), current_block));
+  }
+
+  let mut chunks = Vec::new();
+  let mut chunk_section: Option<String> = None;
+  let mut chunk_lines: Vec<String> = Vec::new();
+  let mut chunk_tokens = 0usize;
+
+  for (section_title, block_lines) in sections {
+    let block_text = block_lines.join("\n");
+    let block_tokens = approximate_tokens(&block_text);
+
+    if block_tokens > max_tokens {
+      for split in split_oversized_block(&block_text, max_tokens) {
+        push_chunk_piece(
+          &mut chunks,
+          &mut chunk_section,
+          &mut chunk_lines,
+          &mut chunk_tokens,
+          section_title.clone(),
+          split,
+          min_tokens,
+          max_tokens,
+        );
+      }
+      continue;
+    }
+
+    push_chunk_piece(
+      &mut chunks,
+      &mut chunk_section,
+      &mut chunk_lines,
+      &mut chunk_tokens,
+      section_title,
+      block_text,
+      min_tokens,
+      max_tokens,
+    );
+  }
+
+  if !chunk_lines.is_empty() {
+    chunks.push(finalize_chunk(chunk_section, chunk_lines));
+  }
+
+  chunks
+}
+
+fn push_chunk_piece(
+  chunks: &mut Vec<(Option<String>, String)>,
+  chunk_section: &mut Option<String>,
+  chunk_lines: &mut Vec<String>,
+  chunk_tokens: &mut usize,
+  section_title: Option<String>,
+  block_text: String,
+  min_tokens: usize,
+  max_tokens: usize,
+) {
+  let block_tokens = approximate_tokens(&block_text);
+  let section_changed = chunk_section.as_deref() != section_title.as_deref();
+  let would_overflow = *chunk_tokens + block_tokens > max_tokens;
+
+  if !chunk_lines.is_empty() && (section_changed || (would_overflow && *chunk_tokens >= min_tokens)) {
+    let lines = std::mem::take(chunk_lines);
+    chunks.push(finalize_chunk(chunk_section.take(), lines));
+    *chunk_tokens = 0;
+  }
+
+  if chunk_section.is_none() {
+    *chunk_section = section_title.clone();
+  }
+  if !chunk_lines.is_empty() {
+    chunk_lines.push(String::new());
+  }
+  chunk_lines.push(block_text);
+  *chunk_tokens += block_tokens;
+}
+
+fn finalize_chunk(section_title: Option<String>, lines: Vec<String>) -> (Option<String>, String) {
+  let body = lines.join("\n").trim().to_string();
+  let text = if let Some(section) = section_title.as_ref() {
+    format!("Section: {}\n---\n{}", section, body)
+  } else {
+    body
+  };
+  (section_title, text)
+}
+
+fn split_oversized_block(text: &str, max_tokens: usize) -> Vec<String> {
+  let mut pieces = Vec::new();
+  let mut current = Vec::new();
+  let mut current_tokens = 0usize;
+
+  for line in text.lines() {
+    let line_tokens = approximate_tokens(line);
+    if !current.is_empty() && current_tokens + line_tokens > max_tokens {
+      pieces.push(current.join("\n"));
+      current.clear();
+      current_tokens = 0;
+    }
+    current.push(line.to_string());
+    current_tokens += line_tokens;
+  }
+
+  if !current.is_empty() {
+    pieces.push(current.join("\n"));
+  }
+
+  pieces
+}
+
+fn parse_heading(line: &str) -> Option<String> {
+  let trimmed = line.trim();
+  if !trimmed.starts_with('#') {
+    return None;
+  }
+  let title = trimmed.trim_start_matches('#').trim();
+  if title.is_empty() {
+    None
+  } else {
+    Some(title.to_string())
+  }
+}
+
+fn approximate_tokens(text: &str) -> usize {
+  text.split_whitespace().count()
+}
+
+fn embed_text(text: &str) -> Vec<f32> {
+  const EMBED_DIM: usize = 192;
+  let normalized = normalize_text_for_embedding(text);
+  if normalized.is_empty() {
+    return vec![0.0; EMBED_DIM];
+  }
+
+  let tokens = normalized.split_whitespace().collect::<Vec<_>>();
+  let mut vector = vec![0.0f32; EMBED_DIM];
+
+  for token in &tokens {
+    apply_feature(&mut vector, token, 1.0);
+  }
+  for window in tokens.windows(2) {
+    apply_feature(&mut vector, &format!("{}__{}", window[0], window[1]), 0.8);
+  }
+
+  let magnitude = vector.iter().map(|value| value * value).sum::<f32>().sqrt();
+  if magnitude > 0.0 {
+    for value in &mut vector {
+      *value /= magnitude;
+    }
+  }
+
+  vector
+}
+
+fn normalize_text_for_embedding(text: &str) -> String {
+  let mut output = String::with_capacity(text.len());
+  let mut last_space = false;
+
+  for ch in text.chars() {
+    if ch.is_ascii_alphanumeric() {
+      output.push(ch.to_ascii_lowercase());
+      last_space = false;
+    } else if !last_space {
+      output.push(' ');
+      last_space = true;
+    }
+  }
+
+  output.trim().to_string()
+}
+
+fn apply_feature(vector: &mut [f32], feature: &str, weight: f32) {
+  let hash = stable_text_hash(feature);
+  let index = usize::from_str_radix(&hash[0..8], 16).unwrap_or(0) % vector.len();
+  let sign = if usize::from_str_radix(&hash[8..16], 16).unwrap_or(0) % 2 == 0 { 1.0 } else { -1.0 };
+  vector[index] += weight * sign;
+}
+
+fn stable_text_hash(value: &str) -> String {
+  let mut hash = 1469598103934665603u64;
+  for byte in value.as_bytes() {
+    hash ^= u64::from(*byte);
+    hash = hash.wrapping_mul(1099511628211);
+  }
+  format!("{:016x}", hash)
+}
+
+fn parse_vector_json(value: &str) -> Vec<f32> {
+  serde_json::from_str::<Vec<f32>>(value).unwrap_or_default()
+}
+
+fn cosine_similarity(left: &[f32], right: &[f32]) -> f32 {
+  if left.is_empty() || right.is_empty() || left.len() != right.len() {
+    return 0.0;
+  }
+  left.iter().zip(right.iter()).map(|(a, b)| a * b).sum::<f32>()
+}
+
+fn truncate_log_line(value: &str, max_chars: usize) -> String {
+  let cleaned = value.replace('\r', " ").replace('\n', " ").trim().to_string();
+  if cleaned.chars().count() <= max_chars {
+    return cleaned;
+  }
+  cleaned.chars().take(max_chars.saturating_sub(3)).collect::<String>() + "..."
 }
 
 fn default_document_markdown(name: &str, document_type: &str) -> String {
@@ -901,6 +1568,7 @@ fn main() {
       add_references,
       update_reference,
       remove_reference,
+      retrieve_memory_context,
       list_agent_cards,
       create_agent_cards,
       update_agent_card

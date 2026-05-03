@@ -14,7 +14,7 @@ Its core job is to help a user:
 6. accept, reject, or edit review cards
 7. rewrite the working context with stronger signal
 
-The app is desktop-first, but it also supports a browser preview mode for UI work.
+The app is desktop-only.
 
 ## Current product model in the code
 
@@ -70,27 +70,14 @@ Review mode then branches into:
 - `technical review`
 - `everything`
 
-## Current runtime modes
+## Current runtime mode
 
-### Desktop mode
-
-Desktop mode is the real application:
+ARM runs in one supported mode:
 
 - Tauri shell
 - Rust backend
 - SQLite persistence
 - local project folders
-
-### Browser preview mode
-
-Browser preview is a convenience mode:
-
-- normal React app in the browser
-- `localStorage` persistence
-- no Rust runtime
-- no real local project folders
-
-This is useful for frontend iteration, but it is not a full simulation of desktop behavior.
 
 ## Who should read this first
 

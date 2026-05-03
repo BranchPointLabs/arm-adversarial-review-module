@@ -35,6 +35,15 @@ export type ProjectReference = {
   createdAt: string;
 };
 
+export type RetrievedMemoryChunk = {
+  chunkId: string;
+  documentTitle: string;
+  sectionTitle: string | null;
+  text: string;
+  similarity: number;
+  sourceKind: "document" | "reference" | "decision";
+};
+
 export type AgentCardType =
   | "info"
   | "open_question"
@@ -54,6 +63,8 @@ export type AgentCard = {
   proposedUpdate: string | null;
   targetSection: string | null;
   sourceAgent: string;
+  sourceDocumentTitle: string | null;
+  sourceSectionTitle: string | null;
   createdAt: string;
 };
 
@@ -71,6 +82,8 @@ export type NewAgentCardInput = {
   proposedUpdate: string | null;
   targetSection: string | null;
   sourceAgent: string;
+  sourceDocumentTitle?: string | null;
+  sourceSectionTitle?: string | null;
 };
 
 export type ProjectDocument = {
@@ -104,6 +117,14 @@ export type ProjectStore = {
   ): Promise<ProjectReference>;
   removeReference(projectPath: string, referenceId: string): Promise<void>;
   listAgentCards(projectPath: string): Promise<AgentCard[]>;
+  retrieveMemoryContext(args: {
+    projectPath: string;
+    activeDocumentId: string | null;
+    currentDocumentMarkdown: string;
+    focusLine: string;
+    agentType: "product" | "technical" | "everything";
+    limit?: number;
+  }): Promise<RetrievedMemoryChunk[]>;
   createAgentCards(projectPath: string, sourceAgent: string, cards: NewAgentCardInput[]): Promise<AgentCard[]>;
   updateAgentCard(
     projectPath: string,

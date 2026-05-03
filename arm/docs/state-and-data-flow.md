@@ -46,18 +46,6 @@ That interface provides:
 - card CRUD
 - legacy current-context load/save
 
-## Browser-mode flow
-
-`browserProjectStore.ts` persists a single JSON structure in `localStorage`.
-
-Important details:
-
-- all projects live under one storage key
-- project creation initializes empty documents, notes, decisions, references, and cards
-- saving a document also updates the in-memory/browser `context` mirror
-
-This means browser preview behavior is close to desktop behavior, but not identical.
-
 ## Desktop-mode flow
 
 `tauriProjectStore.ts` maps each store call to a Tauri command.
@@ -82,7 +70,7 @@ But the backend still keeps:
 - `current_context` SQLite table
 - `context/CURRENT_CONTEXT.md` file
 
-In both browser and desktop implementations, document create/save currently also updates the context mirror.
+Document create/save currently also updates the context mirror.
 
 That means:
 

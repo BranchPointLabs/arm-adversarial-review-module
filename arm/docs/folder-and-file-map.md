@@ -22,9 +22,7 @@
 - [types.ts](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/arm/src/core/types.ts)
   shared frontend types and the `ProjectStore` interface
 - [projectStore.ts](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/arm/src/core/projectStore.ts)
-  runtime store selector
-- [browserProjectStore.ts](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/arm/src/core/browserProjectStore.ts)
-  browser preview persistence
+  desktop store binding
 - [tauriProjectStore.ts](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/arm/src/core/tauriProjectStore.ts)
   Tauri IPC bridge
 - [armEngine.ts](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/arm/src/core/armEngine.ts)

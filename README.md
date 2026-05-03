@@ -18,7 +18,7 @@ This repository currently contains:
 - a static GitHub Pages site at the repository root
 - project documentation in `arm/docs/`
 
-The application is under active development. The current build supports local projects, typed documents, references, notes, decisions, LLM-backed review, heuristic fallback review, and local browser-preview storage.
+The application is under active development. The current build supports local projects, typed documents, references, notes, decisions, LLM-backed review, heuristic fallback review, and desktop-only local persistence.
 
 ## What ARM Does
 
@@ -129,32 +129,7 @@ Open `index.html` directly in a browser, or serve the repository root with any s
 
 This is not the app. It is the project website.
 
-### 2. Browser Preview
-
-The browser preview runs only the React frontend.
-
-From the repository root:
-
-```powershell
-cd arm
-npm install
-npm run dev -- --host 127.0.0.1 --port 5173
-```
-
-Then open:
-
-```text
-http://127.0.0.1:5173/
-```
-
-Browser preview behavior:
-
-- uses `localStorage`
-- does not use the Rust backend
-- does not use native Tauri file access
-- is useful for UI testing and layout work
-
-### 3. Desktop Application
+### 2. Desktop Application
 
 The desktop app is the real application.
 
@@ -174,7 +149,7 @@ Desktop behavior:
 - uses SQLite for project data
 - supports local file operations through Tauri
 
-If the browser preview works but project/file behavior seems wrong, launch the Tauri desktop app.
+If you open the frontend directly in a browser, ARM now shows a desktop-required screen instead of running a fallback mode.
 
 ## First-Time Setup
 
@@ -211,25 +186,11 @@ npm install
 
 ## Common Commands
 
-Run the React browser preview:
-
-```powershell
-cd arm
-npm run dev -- --host 127.0.0.1 --port 5173
-```
-
 Build the frontend:
 
 ```powershell
 cd arm
 npm run build
-```
-
-Preview the built frontend:
-
-```powershell
-cd arm
-npm run preview -- --host 127.0.0.1 --port 4173
 ```
 
 Run the desktop app:
@@ -282,8 +243,6 @@ If an LLM key is missing or a provider call fails, ARM can fall back to the loca
 
 ## Local Data and Persistence
 
-Browser preview stores project data in browser `localStorage`.
-
 The desktop app stores project data locally through the Rust backend. Project data includes:
 
 - projects
@@ -306,7 +265,6 @@ Frontend:
 - `arm/src/ui/project/ProjectWorkspace.tsx`
 - `arm/src/ui/styles.css`
 - `arm/src/core/projectStore.ts`
-- `arm/src/core/browserProjectStore.ts`
 - `arm/src/core/tauriProjectStore.ts`
 - `arm/src/core/llmReview.ts`
 - `arm/src/core/armEngine.ts`
@@ -374,7 +332,6 @@ Known architectural areas to keep improving:
 
 - `ProjectWorkspace.tsx` is large and should eventually be split into smaller components.
 - `src-tauri/src/main.rs` is monolithic and should eventually be split by domain.
-- Browser preview and desktop mode use different storage implementations.
 - Reference ingestion is currently text-first.
 - The card and context update workflow is still being refined through UX iteration.
 

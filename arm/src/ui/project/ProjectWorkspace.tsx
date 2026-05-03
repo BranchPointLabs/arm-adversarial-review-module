@@ -54,7 +54,7 @@ export default function ProjectWorkspace() {
   const location = useLocation();
   const navigate = useNavigate();
   const projectPath = params.projectPath ? decodeURIComponent(params.projectPath) : "";
-  const projectName = projectPath.split(/[\\/]/).filter(Boolean).pop()?.replace(/^browser-preview:\/\//, "") || "Project";
+  const projectName = projectPath.split(/[\\/]/).filter(Boolean).pop() || "Project";
 
   const [navCollapsed, setNavCollapsed] = React.useState(false);
   const [documents, setDocuments] = React.useState<ProjectDocument[]>([]);
@@ -383,6 +383,7 @@ export default function ProjectWorkspace() {
 
   async function generateReviewCardsWithMode(text: string, mode: "product" | "technical") {
     return generateReviewCardsWithLlm({
+      projectPath,
       prompt: text,
       mode,
       activeDocument,
@@ -395,6 +396,7 @@ export default function ProjectWorkspace() {
 
   async function generateChatInfoCard(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput> {
     const reply = await generateChatReplyWithLlm({
+      projectPath,
       prompt: text,
       mode,
       activeDocument,
@@ -417,6 +419,7 @@ export default function ProjectWorkspace() {
   async function generateChatCards(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput[]> {
     try {
       const cards = await generateChatCardsWithLlm({
+        projectPath,
         prompt: text,
         mode,
         activeDocument,
@@ -449,6 +452,7 @@ export default function ProjectWorkspace() {
     }
 
     const baseInput = {
+      projectPath,
       kind,
       updateText: text,
       activeDocument,

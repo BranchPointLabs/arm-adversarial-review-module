@@ -10,6 +10,7 @@ import {
   ProjectDocument,
   ProjectReference,
   ProjectStore,
+  RetrievedMemoryChunk,
 } from "./types";
 
 export function isTauriRuntimeAvailable() {
@@ -37,6 +38,15 @@ export const tauriProjectStore: ProjectStore = {
     invoke<ProjectReference>("update_reference", { projectPath, referenceId, patch }),
   removeReference: (projectPath, referenceId) => invoke<void>("remove_reference", { projectPath, referenceId }),
   listAgentCards: (projectPath) => invoke<AgentCard[]>("list_agent_cards", { projectPath }),
+  retrieveMemoryContext: (args) =>
+    invoke<RetrievedMemoryChunk[]>("retrieve_memory_context", {
+      projectPath: args.projectPath,
+      activeDocumentId: args.activeDocumentId,
+      currentDocumentMarkdown: args.currentDocumentMarkdown,
+      focusLine: args.focusLine,
+      agentType: args.agentType,
+      limit: args.limit ?? 5,
+    }),
   createAgentCards: (projectPath, sourceAgent, cards) =>
     invoke<AgentCard[]>("create_agent_cards", { projectPath, sourceAgent, cards }),
   updateAgentCard: (projectPath, cardId, patch) =>

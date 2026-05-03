@@ -7,10 +7,7 @@ ARM is split into two main layers:
 1. React + TypeScript frontend in `src/`
 2. Tauri + Rust backend in `src-tauri/`
 
-There is also a runtime selection layer that chooses between:
-
-- a desktop project store
-- a browser-preview project store
+The runtime is desktop-only and uses a Tauri-backed project store.
 
 ## Main frontend pieces
 
@@ -55,10 +52,7 @@ Architecturally, this file is carrying too much responsibility and is the main f
 
 This is the main runtime abstraction. The UI talks to `projectStore`, and `projectStore` chooses the concrete implementation:
 
-- [browserProjectStore.ts](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/arm/src/core/browserProjectStore.ts)
 - [tauriProjectStore.ts](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/arm/src/core/tauriProjectStore.ts)
-
-That boundary is one of the cleaner architectural decisions in the current app.
 
 ### Local review and context drafting
 
@@ -130,12 +124,6 @@ This works, but it is the largest structural weakness on the backend side.
 
 ## Storage architecture
 
-### Browser mode
-
-- data is stored in browser `localStorage`
-- all entities are kept in a single serialized JSON blob
-- no local files are created
-
 ### Desktop mode
 
 - each project gets a local folder
@@ -156,7 +144,6 @@ This works, but it is the largest structural weakness on the backend side.
 - `main.rs` is overloaded
 - legacy `current_context` mirror still exists beside the new document-centric model
 - some older screens still exist in `src/ui/screens/` but are no longer the main workspace path
-- browser and desktop behaviors differ enough that bugs can hide in one mode
 
 ## Suggested refactor targets
 

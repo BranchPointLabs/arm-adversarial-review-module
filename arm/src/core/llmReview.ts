@@ -1,4 +1,5 @@
 import { getApiKey, loadLlmSettings } from "./llmSettings";
+import { projectStore } from "./projectStore";
 import { generalChatPersona, personaForMode } from "./reviewPersonas";
 import {
   AgentCardType,
@@ -7,12 +8,14 @@ import {
   NewAgentCardInput,
   ProjectDocument,
   ProjectReference,
+  RetrievedMemoryChunk,
 } from "./projectStore";
 
 type ProviderReviewMode = "product" | "technical";
 export type ChatPersonaMode = "chat" | "product" | "technical";
 
 type ReviewRequest = {
+  projectPath: string;
   prompt: string;
   mode: ProviderReviewMode;
   activeDocument: ProjectDocument | null;
@@ -36,7 +39,7 @@ const cardSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["type", "title", "body", "proposedUpdate", "targetSection"],
+        required: ["type", "title", "body", "proposedUpdate", "targetSection", "sourceDocumentTitle", "sourceSectionTitle"],
         properties: {
           type: {
             type: "string",
@@ -46,6 +49,8 @@ const cardSchema = {
           body: { type: "string" },
           proposedUpdate: { type: ["string", "null"] },
           targetSection: { type: ["string", "null"] },
+          sourceDocumentTitle: { type: ["string", "null"] },
+          sourceSectionTitle: { type: ["string", "null"] },
         },
       },
     },
@@ -64,7 +69,7 @@ const chatCardSchema = {
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["type", "title", "body", "proposedUpdate", "targetSection"],
+        required: ["type", "title", "body", "proposedUpdate", "targetSection", "sourceDocumentTitle", "sourceSectionTitle"],
         properties: {
           type: {
             type: "string",
@@ -74,6 +79,8 @@ const chatCardSchema = {
           body: { type: "string" },
           proposedUpdate: { type: ["string", "null"] },
           targetSection: { type: ["string", "null"] },
+          sourceDocumentTitle: { type: ["string", "null"] },
+          sourceSectionTitle: { type: ["string", "null"] },
         },
       },
     },
@@ -88,16 +95,23 @@ export async function generateReviewCardsWithLlm(input: ReviewRequest): Promise<
   }
 
   const instruction = buildInstruction(input.mode);
-  const payload = buildReviewPayload(input);
+  const retrievedContext = await retrieveMemoryContext(input);
+  logRetrievedContext(input.mode, retrievedContext);
+  const payload = buildReviewPayload(input, retrievedContext);
 
   if (settings.provider === "openai") {
-    return callOpenAi(settings.modelByProvider.openai, apiKey, instruction, payload, sourceAgentForMode(input.mode));
+    const cards = await callOpenAi(settings.modelByProvider.openai, apiKey, instruction, payload, sourceAgentForMode(input.mode));
+    logCardSources(cards);
+    return cards;
   }
 
-  return callAnthropic(settings.modelByProvider.anthropic, apiKey, instruction, payload, sourceAgentForMode(input.mode));
+  const cards = await callAnthropic(settings.modelByProvider.anthropic, apiKey, instruction, payload, sourceAgentForMode(input.mode));
+  logCardSources(cards);
+  return cards;
 }
 
 export async function generateChatCardsWithLlm(input: {
+  projectPath: string;
   prompt: string;
   mode: ChatPersonaMode;
   activeDocument: ProjectDocument | null;
@@ -124,6 +138,7 @@ export async function generateChatCardsWithLlm(input: {
 }
 
 export async function generateChatReplyWithLlm(input: {
+  projectPath: string;
   prompt: string;
   mode: ChatPersonaMode;
   activeDocument: ProjectDocument | null;
@@ -150,6 +165,7 @@ export async function generateChatReplyWithLlm(input: {
 }
 
 export async function generateDocumentUpdateWithLlm(input: {
+  projectPath: string;
   mode: ChatPersonaMode;
   kind: "note" | "decision";
   updateText: string;
@@ -198,6 +214,10 @@ function buildInstruction(mode: ProviderReviewMode) {
     "Only use these card types: info, open_question, action, warning.",
     "For product and technical reviews, include a useful mix of card types. Do not return only info cards.",
     "When possible include: one info card, one warning card, one open_question card, and one action card.",
+    "Retrieved context is supporting evidence only. Do not treat it as automatic truth.",
+    "Use retrieved context to identify contradictions, surface risks, ask better questions, and propose decisions.",
+    "If a card materially relies on retrieved context, set sourceDocumentTitle and sourceSectionTitle from the supporting snippet.",
+    "If a card does not rely on retrieved context, set sourceDocumentTitle and sourceSectionTitle to null.",
   ].join("\n");
 }
 
@@ -290,7 +310,7 @@ function buildChatCardInstruction(mode: ChatPersonaMode) {
   ].join("\n");
 }
 
-function buildReviewPayload(input: ReviewRequest) {
+function buildReviewPayload(input: ReviewRequest, retrievedContext: RetrievedMemoryChunk[]) {
   return JSON.stringify(
     {
       reviewMode: input.mode,
@@ -316,6 +336,19 @@ function buildReviewPayload(input: ReviewRequest) {
           summary: reference.summary,
           extractedText: (reference.extractedText || "").slice(0, 3000) || null,
         })),
+      retrievedContext: retrievedContext.map((chunk) => ({
+        source: chunk.sectionTitle ? `${chunk.documentTitle} > ${chunk.sectionTitle}` : chunk.documentTitle,
+        documentTitle: chunk.documentTitle,
+        sectionTitle: chunk.sectionTitle,
+        text: chunk.text,
+        similarity: Number(chunk.similarity.toFixed(4)),
+      })),
+      retrievalRules: [
+        "Retrieved context is supporting evidence only.",
+        "Do not assume retrieved content is correct without validation.",
+        "Do not rewrite the document directly.",
+        "Use retrieved content to improve review quality, not to replace the active document.",
+      ],
     },
     null,
     2,
@@ -544,9 +577,50 @@ function normalizeCards(cards: any[], sourceAgent: string): NewAgentCardInput[] 
       proposedUpdate: normalizeOptionalString(card?.proposedUpdate),
       targetSection: normalizeOptionalString(card?.targetSection),
       sourceAgent,
+      sourceDocumentTitle: normalizeOptionalString(card?.sourceDocumentTitle),
+      sourceSectionTitle: normalizeOptionalString(card?.sourceSectionTitle),
     }))
     .filter((card) => card.type && card.title && card.body)
     .slice(0, 5) as NewAgentCardInput[];
+}
+
+function logRetrievedContext(mode: ProviderReviewMode, chunks: RetrievedMemoryChunk[]) {
+  if (chunks.length === 0) {
+    console.info(`[arm-memory] mode=${mode} retrieved=0`);
+    return;
+  }
+
+  console.info(
+    `[arm-memory] mode=${mode} retrieved=${chunks.length} sources=${chunks
+      .map((chunk) => `${chunk.documentTitle}${chunk.sectionTitle ? ` > ${chunk.sectionTitle}` : ""} (${chunk.similarity.toFixed(3)})`)
+      .join(" | ")}`,
+  );
+}
+
+function logCardSources(cards: NewAgentCardInput[]) {
+  const attributed = cards.filter((card) => card.sourceDocumentTitle);
+  console.info(
+    `[arm-memory] cards_with_source=${attributed.length} ${attributed
+      .map((card) => `${card.title} -> ${card.sourceDocumentTitle}${card.sourceSectionTitle ? ` > ${card.sourceSectionTitle}` : ""}`)
+      .join(" | ")}`,
+  );
+}
+
+async function retrieveMemoryContext(input: ReviewRequest): Promise<RetrievedMemoryChunk[]> {
+  if (projectStore.runtime !== "desktop") return [];
+
+  try {
+    return await projectStore.retrieveMemoryContext({
+      projectPath: input.projectPath,
+      activeDocumentId: input.activeDocument?.id || null,
+      currentDocumentMarkdown: input.currentContext,
+      focusLine: input.prompt,
+      agentType: input.mode,
+      limit: 5,
+    });
+  } catch {
+    return [];
+  }
 }
 
 function normalizeCardType(value: unknown): AgentCardType {

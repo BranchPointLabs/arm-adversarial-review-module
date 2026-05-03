@@ -41,14 +41,13 @@ Some documentation outside this docs set also still refers to:
 
 Those details are no longer fully accurate.
 
-### 5. Browser preview and desktop mode are materially different
+### 5. Browser tabs are not a supported runtime
 
-Bugs can hide because:
+ARM is desktop-only now.
 
-- browser preview uses `localStorage`
-- desktop uses SQLite and filesystem mirrors
+If you open the frontend in a normal browser tab, the app intentionally stops at a desktop-required screen.
 
-Both must be tested.
+Use the Tauri window for any meaningful testing of persistence, references, project folders, or LLM-backed flows.
 
 ## Current mocks and fallback behavior
 
@@ -57,12 +56,6 @@ Both must be tested.
 If the provider path fails, the app can still generate cards locally through `armEngine.ts`.
 
 This is not a fake UI mock. It is a real fallback behavior.
-
-### Browser project store
-
-Browser preview is effectively a mocked local persistence environment built on `localStorage`.
-
-That is useful, but it should not be mistaken for the real desktop persistence layer.
 
 ## Text-handling limitations
 

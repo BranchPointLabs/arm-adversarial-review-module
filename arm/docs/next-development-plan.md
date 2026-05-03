@@ -55,7 +55,6 @@ Highest-value additions:
 
 - project-store integration tests
 - mocked LLM review tests
-- browser-preview smoke tests
 - desktop end-to-end smoke checks
 
 ### 6. Improve secrets handling if desired
@@ -75,4 +74,4 @@ Only after the context model is stable:
 
 - do not add more large features into `ProjectWorkspace.tsx` first
 - do not deepen the mirror model before deciding whether it should exist
-- do not treat browser preview as sufficient validation for desktop correctness
+- do not treat a plain browser tab as sufficient validation for desktop correctness

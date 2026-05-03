@@ -847,6 +847,53 @@ button:disabled {
   margin-top: 8px;
 }
 
+.desktopOnlyState {
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+}
+
+.desktopOnlyCard {
+  width: min(680px, 100%);
+  display: grid;
+  gap: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  padding: 28px;
+}
+
+.desktopOnlyCard h1 {
+  margin: 0;
+  font-size: clamp(32px, 4vw, 54px);
+  line-height: 0.96;
+}
+
+.desktopOnlyCard p {
+  margin: 0;
+  max-width: 56ch;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1.45;
+}
+
+.desktopOnlyCommand {
+  white-space: pre-line;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 14px 16px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.desktopOnlyHint {
+  font-size: 14px;
+}
+
 .surfaceCard {
   padding: 16px;
 }
@@ -984,10 +1031,12 @@ button:disabled {
 }
 
 .reviewCardBody,
+.reviewCardSource,
 .reviewCardUpdate {
   line-height: 1.45;
 }
 
+.reviewCardSource,
 .reviewCardUpdate {
   color: var(--muted);
 }
