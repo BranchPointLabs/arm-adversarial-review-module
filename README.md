@@ -20,6 +20,8 @@ This repository currently contains:
 
 The application is under active development. The current build supports local projects, typed documents, references, notes, decisions, LLM-backed review, heuristic fallback review, and desktop-only local persistence.
 
+For a product-facing overview of what the app supports, see [features.md](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/features.md).
+
 ## What ARM Does
 
 ARM is built around a selected document. That document is the source of truth for the current project query.

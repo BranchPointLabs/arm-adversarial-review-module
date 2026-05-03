@@ -2,6 +2,8 @@
 
 ARM is the `Adversarial Review Module`: a desktop app for shaping project thinking into a living context document.
 
+For a product-facing feature overview, see [features.md](C:/Users/clbra/OneDrive/Desktop/arm-adversarial-review-module/features.md).
+
 ## What the app does
 
 ARM keeps one `CURRENT_CONTEXT.md` per project and lets you build around it with:
