@@ -47,6 +47,24 @@ struct Decision {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct DiagramEntity {
+  id: String,
+  name: String,
+  responsibility: String,
+  collaborators: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DiagramEntityInput {
+  id: String,
+  name: String,
+  responsibility: String,
+  collaborators: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ProjectDocument {
   id: String,
   project_id: String,
@@ -54,6 +72,8 @@ struct ProjectDocument {
   #[serde(rename = "type")]
   document_type: String,
   markdown: String,
+  entities: Vec<DiagramEntity>,
+  mermaid: String,
   created_at: String,
   updated_at: String,
 }
@@ -267,7 +287,7 @@ fn list_documents(project_path: String) -> Result<Vec<ProjectDocument>, String> 
 
   let mut stmt = conn
     .prepare(
-      "SELECT id, project_id, name, document_type, markdown, created_at, updated_at
+      "SELECT id, project_id, name, document_type, markdown, diagram_entities, mermaid, created_at, updated_at
        FROM documents
        ORDER BY updated_at DESC",
     )
@@ -292,11 +312,13 @@ fn create_document(project_path: String, name: String, document_type: String) ->
   let project_id = get_project_id(&conn).map_err(to_err)?;
   let now = Utc::now().to_rfc3339();
   let id = Uuid::new_v4().to_string();
+  let entities: Vec<DiagramEntityInput> = Vec::new();
+  let mermaid = generate_mermaid(&entities);
   let markdown = default_document_markdown(trimmed, &document_type);
   conn
     .execute(
-      "INSERT INTO documents (id, project_id, name, document_type, markdown, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-      params![id, project_id, trimmed, document_type, markdown, now, now],
+      "INSERT INTO documents (id, project_id, name, document_type, markdown, diagram_entities, mermaid, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+      params![id, project_id, trimmed, document_type, markdown, "[]", mermaid, now, now],
     )
     .map_err(to_err)?;
   touch_project(&conn, &now).map_err(to_err)?;
@@ -307,6 +329,8 @@ fn create_document(project_path: String, name: String, document_type: String) ->
     name: trimmed.to_string(),
     document_type,
     markdown,
+    entities: Vec::new(),
+    mermaid,
     created_at: now.clone(),
     updated_at: now,
   })
@@ -319,11 +343,75 @@ fn load_document(project_path: String, document_id: String) -> Result<ProjectDoc
 
   conn
     .query_row(
-      "SELECT id, project_id, name, document_type, markdown, created_at, updated_at FROM documents WHERE id=?1",
+      "SELECT id, project_id, name, document_type, markdown, diagram_entities, mermaid, created_at, updated_at FROM documents WHERE id=?1",
       params![document_id],
       map_document,
     )
     .map_err(to_err)
+}
+
+#[command]
+fn save_diagram_document(
+  project_path: String,
+  document_id: String,
+  entities: Vec<DiagramEntityInput>,
+) -> Result<ProjectDocument, String> {
+  let project_path = PathBuf::from(project_path);
+  let conn = open_project_conn(&project_path)?;
+  let current_type: String = conn
+    .query_row(
+      "SELECT document_type FROM documents WHERE id=?1",
+      params![document_id.clone()],
+      |row| row.get(0),
+    )
+    .map_err(to_err)?;
+  if current_type != "diagram" {
+    return Err("Only diagram documents can save entity cards.".into());
+  }
+
+  let normalized = normalize_diagram_entities(entities);
+  let entities_json = serde_json::to_string(&normalized).map_err(to_err)?;
+  let mermaid = generate_mermaid(&normalized);
+  let markdown = diagram_markdown(&normalized);
+  let now = Utc::now().to_rfc3339();
+
+  conn
+    .execute(
+      "UPDATE documents SET markdown=?1, diagram_entities=?2, mermaid=?3, updated_at=?4 WHERE id=?5",
+      params![markdown, entities_json, mermaid, now, document_id],
+    )
+    .map_err(to_err)?;
+  touch_project(&conn, &now).map_err(to_err)?;
+  schedule_memory_reindex(project_path, MemorySourceKind::Document, document_id.clone());
+  load_document_from_conn(&conn, &document_id)
+}
+
+#[command]
+fn save_diagram_mermaid(project_path: String, document_id: String, mermaid: String) -> Result<ProjectDocument, String> {
+  let project_path = PathBuf::from(project_path);
+  let conn = open_project_conn(&project_path)?;
+  let current_type: String = conn
+    .query_row(
+      "SELECT document_type FROM documents WHERE id=?1",
+      params![document_id.clone()],
+      |row| row.get(0),
+    )
+    .map_err(to_err)?;
+  if current_type != "diagram" {
+    return Err("Only diagram documents can save Mermaid code.".into());
+  }
+
+  let mermaid = ensure_trailing_newline(&mermaid);
+  let now = Utc::now().to_rfc3339();
+  conn
+    .execute(
+      "UPDATE documents SET mermaid=?1, updated_at=?2 WHERE id=?3",
+      params![mermaid, now, document_id],
+    )
+    .map_err(to_err)?;
+  touch_project(&conn, &now).map_err(to_err)?;
+  schedule_memory_reindex(project_path, MemorySourceKind::Document, document_id.clone());
+  load_document_from_conn(&conn, &document_id)
 }
 
 #[command]
@@ -755,8 +843,10 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN')),
+      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN', 'diagram')),
       markdown TEXT NOT NULL,
+      diagram_entities TEXT NOT NULL DEFAULT '[]',
+      mermaid TEXT NOT NULL DEFAULT 'flowchart LR',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -818,7 +908,16 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     "#,
   )?;
 
-  migrate_documents_plan_type(conn)?;
+  migrate_documents_diagram_type(conn)?;
+
+  let _ = conn.execute(
+    "ALTER TABLE documents ADD COLUMN diagram_entities TEXT NOT NULL DEFAULT '[]'",
+    [],
+  );
+  let _ = conn.execute(
+    "ALTER TABLE documents ADD COLUMN mermaid TEXT NOT NULL DEFAULT 'flowchart LR'",
+    [],
+  );
 
   let has_selected = conn
     .prepare("SELECT is_selected FROM project_references LIMIT 1")
@@ -843,14 +942,14 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
   Ok(())
 }
 
-fn migrate_documents_plan_type(conn: &Connection) -> rusqlite::Result<()> {
+fn migrate_documents_diagram_type(conn: &Connection) -> rusqlite::Result<()> {
   let table_sql: String = conn.query_row(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='documents'",
     [],
     |row| row.get(0),
   )?;
 
-  if table_sql.contains("'PLAN'") {
+  if table_sql.contains("'diagram'") {
     return Ok(());
   }
 
@@ -861,13 +960,15 @@ fn migrate_documents_plan_type(conn: &Connection) -> rusqlite::Result<()> {
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN')),
+      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN', 'diagram')),
       markdown TEXT NOT NULL,
+      diagram_entities TEXT NOT NULL DEFAULT '[]',
+      mermaid TEXT NOT NULL DEFAULT 'flowchart LR',
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-    INSERT INTO documents (id, project_id, name, document_type, markdown, created_at, updated_at)
-      SELECT id, project_id, name, document_type, markdown, created_at, updated_at FROM documents_old;
+    INSERT INTO documents (id, project_id, name, document_type, markdown, diagram_entities, mermaid, created_at, updated_at)
+      SELECT id, project_id, name, document_type, markdown, '[]', 'flowchart LR', created_at, updated_at FROM documents_old;
     DROP TABLE documents_old;
     "#,
   )?;
@@ -906,15 +1007,39 @@ fn load_agent_card(conn: &Connection, card_id: &str) -> Result<AgentCard, String
     .map_err(to_err)
 }
 
+fn load_document_from_conn(conn: &Connection, document_id: &str) -> Result<ProjectDocument, String> {
+  conn
+    .query_row(
+      "SELECT id, project_id, name, document_type, markdown, diagram_entities, mermaid, created_at, updated_at FROM documents WHERE id=?1",
+      params![document_id],
+      map_document,
+    )
+    .map_err(to_err)
+}
+
 fn map_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectDocument> {
+  let entities_json: String = row.get(5)?;
+  let entity_inputs = serde_json::from_str::<Vec<DiagramEntityInput>>(&entities_json).unwrap_or_default();
+  let entities = entity_inputs
+    .into_iter()
+    .map(|entity| DiagramEntity {
+      id: entity.id,
+      name: entity.name,
+      responsibility: entity.responsibility,
+      collaborators: entity.collaborators,
+    })
+    .collect();
+
   Ok(ProjectDocument {
     id: row.get(0)?,
     project_id: row.get(1)?,
     name: row.get(2)?,
     document_type: row.get(3)?,
     markdown: row.get(4)?,
-    created_at: row.get(5)?,
-    updated_at: row.get(6)?,
+    entities,
+    mermaid: row.get(6)?,
+    created_at: row.get(7)?,
+    updated_at: row.get(8)?,
   })
 }
 
@@ -1476,6 +1601,10 @@ fn truncate_log_line(value: &str, max_chars: usize) -> String {
 }
 
 fn default_document_markdown(name: &str, document_type: &str) -> String {
+  if document_type == "diagram" {
+    return ensure_trailing_newline(&format!("# {}\n\nNo diagram entities yet.", name));
+  }
+
   if document_type == "PLAN" {
     return ensure_trailing_newline(&format!(
       "# {}\n\n## Initiative 1\n- Source: \n- Why: \n- Action: \n- Success Signal: \n\n## Decision after execution\n- [ ] Proceed\n- [ ] Iterate\n- [ ] Kill\n",
@@ -1497,10 +1626,118 @@ fn default_document_markdown(name: &str, document_type: &str) -> String {
 }
 
 fn validate_document_type(document_type: &str) -> Result<(), String> {
-  if document_type == "IDEA" || document_type == "PRD" || document_type == "PLAN" {
+  if document_type == "IDEA" || document_type == "PRD" || document_type == "PLAN" || document_type == "diagram" {
     return Ok(());
   }
-  Err("Document type must be IDEA, PRD, or PLAN.".into())
+  Err("Document type must be IDEA, PRD, PLAN, or diagram.".into())
+}
+
+fn normalize_diagram_entities(entities: Vec<DiagramEntityInput>) -> Vec<DiagramEntityInput> {
+  let known_ids = entities
+    .iter()
+    .filter_map(|entity| {
+      let id = entity.id.trim();
+      if id.is_empty() {
+        None
+      } else {
+        Some(id.to_string())
+      }
+    })
+    .collect::<std::collections::HashSet<_>>();
+
+  entities
+    .into_iter()
+    .filter_map(|entity| {
+      let id = entity.id.trim();
+      let name = entity.name.trim();
+      if id.is_empty() || name.is_empty() {
+        return None;
+      }
+
+      let collaborators = entity
+        .collaborators
+        .into_iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value != id && known_ids.contains(value))
+        .fold(Vec::new(), |mut acc, value| {
+          if !acc.contains(&value) {
+            acc.push(value);
+          }
+          acc
+        });
+
+      Some(DiagramEntityInput {
+        id: id.to_string(),
+        name: name.to_string(),
+        responsibility: entity.responsibility.trim().to_string(),
+        collaborators,
+      })
+    })
+    .collect()
+}
+
+fn generate_mermaid(entities: &[DiagramEntityInput]) -> String {
+  let mut lines = vec!["flowchart LR".to_string()];
+  for entity in entities {
+    lines.push(format!(
+      "  {}[\"{}\"]",
+      mermaid_id(&entity.id),
+      mermaid_label(&entity.name, &entity.responsibility),
+    ));
+  }
+
+  for entity in entities {
+    for collaborator_id in &entity.collaborators {
+      lines.push(format!("  {} --> {}", mermaid_id(&entity.id), mermaid_id(collaborator_id)));
+    }
+  }
+
+  ensure_trailing_newline(&lines.join("\n"))
+}
+
+fn diagram_markdown(entities: &[DiagramEntityInput]) -> String {
+  if entities.is_empty() {
+    return "No diagram entities yet.\n".to_string();
+  }
+
+  let mut lines = Vec::new();
+  for entity in entities {
+    lines.push(format!("## {}", entity.name));
+    if entity.responsibility.trim().is_empty() {
+      lines.push("Responsibility:".to_string());
+    } else {
+      lines.push(format!("Responsibility: {}", entity.responsibility));
+    }
+    if entity.collaborators.is_empty() {
+      lines.push("Collaborators: none".to_string());
+    } else {
+      lines.push(format!("Collaborators: {}", entity.collaborators.join(", ")));
+    }
+    lines.push(String::new());
+  }
+
+  ensure_trailing_newline(&lines.join("\n"))
+}
+
+fn mermaid_id(value: &str) -> String {
+  let mut out = String::from("entity_");
+  for ch in value.chars() {
+    if ch.is_ascii_alphanumeric() {
+      out.push(ch.to_ascii_lowercase());
+    } else {
+      out.push('_');
+    }
+  }
+  out
+}
+
+fn mermaid_label(name: &str, responsibility: &str) -> String {
+  let label = if responsibility.trim().is_empty() {
+    name.trim().to_string()
+  } else {
+    format!("{}\nResponsibility: {}", name.trim(), responsibility.trim())
+  };
+  label.replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "<br/>")
 }
 
 fn validate_card_type(card_type: &str) -> Result<(), String> {
@@ -1560,6 +1797,8 @@ fn main() {
       create_document,
       load_document,
       save_document,
+      save_diagram_document,
+      save_diagram_mermaid,
       add_chat_note,
       list_chat_notes,
       add_decision,

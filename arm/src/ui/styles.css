@@ -352,6 +352,125 @@ button:disabled {
   line-height: 1.45;
 }
 
+.diagramDocument {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.diagramModeBar {
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+.diagramViewport {
+  min-height: 0;
+  overflow: auto;
+  background: #fff;
+}
+
+.diagramCanvas {
+  min-width: 100%;
+  min-height: 100%;
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 28px;
+  padding: 28px;
+}
+
+.diagramRelationship,
+.diagramStandalone {
+  display: flex;
+  align-items: center;
+  gap: 28px;
+}
+
+.diagramStandalone {
+  flex-wrap: wrap;
+}
+
+.diagramNode {
+  width: 240px;
+  min-height: 96px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 6px;
+  border: 2px solid #777;
+  background: #f1f1f1;
+  padding: 16px;
+  text-align: center;
+}
+
+.diagramNodeName {
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.diagramNodeResponsibility {
+  font-size: 18px;
+  line-height: 1.15;
+}
+
+.diagramArrow {
+  width: 70px;
+  height: 2px;
+  position: relative;
+  background: #555;
+  flex: 0 0 auto;
+}
+
+.diagramArrow::after {
+  content: "";
+  position: absolute;
+  right: -1px;
+  top: -5px;
+  border-left: 11px solid #555;
+  border-top: 6px solid transparent;
+  border-bottom: 6px solid transparent;
+}
+
+.diagramFooter {
+  border-top: 1px solid var(--line);
+  padding: 12px;
+}
+
+.diagramFooter .primary {
+  min-width: 120px;
+}
+
+.diagramCode {
+  border: 0;
+  border-radius: 0;
+}
+
+.diagramCode:read-only {
+  background: #f8f6f1;
+  color: var(--muted);
+}
+
+.iconButton.active {
+  border-color: var(--ink);
+  background: var(--panel-strong);
+}
+
+.diagramEmpty {
+  min-height: 100%;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+}
+
 .workspaceStatus {
   min-height: 18px;
   color: var(--muted);
@@ -548,10 +667,17 @@ button:disabled {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.segmentedControl.documentKindBar,
+.segmentedControl.diagramModeBar {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .segmentedControl.sidebarFeatureBar .segmentedPill,
 .segmentedControl.sidebarActionBar .segmentedPill,
 .segmentedControl.resolveActionBar .segmentedPill,
-.segmentedControl.planModeBar .segmentedPill {
+.segmentedControl.planModeBar .segmentedPill,
+.segmentedControl.documentKindBar .segmentedPill,
+.segmentedControl.diagramModeBar .segmentedPill {
   min-width: 0;
   min-height: 30px;
   padding: 6px 4px;
@@ -1085,7 +1211,8 @@ button:disabled {
 
 input.textInput,
 .selectInput,
-textarea.miniEditor {
+textarea.miniEditor,
+textarea.textInput {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1100,6 +1227,36 @@ textarea.miniEditor {
 
 textarea.miniEditor {
   min-height: 120px;
+}
+
+.fieldLabel {
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.diagramTextarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+.diagramCollaboratorList {
+  max-height: 140px;
+  display: grid;
+  gap: 8px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 10px;
+}
+
+.diagramCollaborator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 button.secondary {

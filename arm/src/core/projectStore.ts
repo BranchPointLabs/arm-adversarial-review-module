@@ -6,6 +6,7 @@ export type {
   AgentCardType,
   ChatNote,
   Decision,
+  DiagramEntity,
   DocumentType,
   NewAgentCardInput,
   NewReferenceInput,

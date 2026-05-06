@@ -22,7 +22,14 @@ export type Decision = {
   createdAt: string;
 };
 
-export type DocumentType = "IDEA" | "PRD" | "PLAN";
+export type DocumentType = "IDEA" | "PRD" | "PLAN" | "diagram";
+
+export type DiagramEntity = {
+  id: string;
+  name: string;
+  responsibility: string;
+  collaborators: string[];
+};
 
 export type ProjectReference = {
   id: string;
@@ -92,6 +99,8 @@ export type ProjectDocument = {
   name: string;
   type: DocumentType;
   markdown: string;
+  entities: DiagramEntity[];
+  mermaid: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -104,6 +113,8 @@ export type ProjectStore = {
   createDocument(projectPath: string, name: string, type: DocumentType): Promise<ProjectDocument>;
   loadDocument(projectPath: string, documentId: string): Promise<ProjectDocument>;
   saveDocument(projectPath: string, documentId: string, markdown: string): Promise<void>;
+  saveDiagramDocument(projectPath: string, documentId: string, entities: DiagramEntity[]): Promise<ProjectDocument>;
+  saveDiagramMermaid(projectPath: string, documentId: string, mermaid: string): Promise<ProjectDocument>;
   addChatNote(projectPath: string, text: string, tags: string[] | null): Promise<ChatNote>;
   listChatNotes(projectPath: string): Promise<ChatNote[]>;
   addDecision(projectPath: string, text: string, reason: string | null): Promise<Decision>;

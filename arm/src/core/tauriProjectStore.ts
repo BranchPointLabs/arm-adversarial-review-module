@@ -1,8 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import {
   AgentCard,
   ChatNote,
   Decision,
+  DiagramEntity,
   DocumentType,
   NewAgentCardInput,
   NewReferenceInput,
@@ -14,8 +15,7 @@ import {
 } from "./types";
 
 export function isTauriRuntimeAvailable() {
-  const anyGlobal = globalThis as any;
-  return typeof anyGlobal?.__TAURI__?.core?.invoke === "function";
+  return isTauri();
 }
 
 export const tauriProjectStore: ProjectStore = {
@@ -28,6 +28,10 @@ export const tauriProjectStore: ProjectStore = {
   loadDocument: (projectPath, documentId) => invoke<ProjectDocument>("load_document", { projectPath, documentId }),
   saveDocument: (projectPath, documentId, markdown) =>
     invoke<void>("save_document", { projectPath, documentId, markdown }),
+  saveDiagramDocument: (projectPath, documentId, entities: DiagramEntity[]) =>
+    invoke<ProjectDocument>("save_diagram_document", { projectPath, documentId, entities }),
+  saveDiagramMermaid: (projectPath, documentId, mermaid) =>
+    invoke<ProjectDocument>("save_diagram_mermaid", { projectPath, documentId, mermaid }),
   addChatNote: (projectPath, text, tags) => invoke<ChatNote>("add_chat_note", { projectPath, text, tags }),
   listChatNotes: (projectPath) => invoke<ChatNote[]>("list_chat_notes", { projectPath }),
   addDecision: (projectPath, text, reason) => invoke<Decision>("add_decision", { projectPath, text, reason }),

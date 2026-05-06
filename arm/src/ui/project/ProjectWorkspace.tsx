@@ -13,6 +13,7 @@ import {
   AgentCard,
   ChatNote,
   Decision,
+  DiagramEntity,
   DocumentType,
   NewAgentCardInput,
   ProjectDocument,
@@ -26,6 +27,7 @@ import PlanModeModal from "./PlanModeModal";
 type ViewKey = "context" | "notes" | "decisions" | "references" | "document";
 type ChatMode = "chat" | "product" | "technical" | "everything";
 type ResolveKind = "patch" | "decision" | "open_question";
+type DiagramMode = "diagram" | "code";
 
 const acceptedReferenceTypes = [
   ".txt",
@@ -77,8 +79,20 @@ export default function ProjectWorkspace() {
 
   const [addDocumentOpen, setAddDocumentOpen] = React.useState(false);
   const [newDocumentName, setNewDocumentName] = React.useState("");
+  const [newDocumentKind, setNewDocumentKind] = React.useState<"text" | "diagram">("text");
   const [newDocumentType, setNewDocumentType] = React.useState<DocumentType>("IDEA");
   const [newDocumentStatus, setNewDocumentStatus] = React.useState<string | null>(null);
+  const [diagramMode, setDiagramMode] = React.useState<DiagramMode>("diagram");
+  const [diagramMermaidDraft, setDiagramMermaidDraft] = React.useState("");
+  const [diagramCodeEditing, setDiagramCodeEditing] = React.useState(false);
+  const [addDiagramCardOpen, setAddDiagramCardOpen] = React.useState(false);
+  const [diagramEntityMode, setDiagramEntityMode] = React.useState<"existing" | "new">("new");
+  const [diagramEntityId, setDiagramEntityId] = React.useState("");
+  const [diagramEntityName, setDiagramEntityName] = React.useState("");
+  const [diagramResponsibility, setDiagramResponsibility] = React.useState("");
+  const [diagramCollaboratorIds, setDiagramCollaboratorIds] = React.useState<string[]>([]);
+  const [diagramNewCollaboratorName, setDiagramNewCollaboratorName] = React.useState("");
+  const [diagramCardStatus, setDiagramCardStatus] = React.useState<string | null>(null);
 
   const [updateOpen, setUpdateOpen] = React.useState(false);
   const [updateText, setUpdateText] = React.useState("");
@@ -124,6 +138,11 @@ export default function ProjectWorkspace() {
       null;
     setActiveDocument(nextDocument);
     setDocumentMarkdown(nextDocument?.markdown || "");
+    if (nextDocument?.type === "diagram") {
+      setDiagramMode("diagram");
+      setDiagramMermaidDraft(nextDocument.mermaid || "");
+      setDiagramCodeEditing(false);
+    }
   }, [documents, routeDocumentId, projectPath]);
 
   if (!projectPath) {
@@ -187,15 +206,130 @@ export default function ProjectWorkspace() {
 
     setBusy(true);
     try {
-      const document = await projectStore.createDocument(projectPath, trimmed, newDocumentType);
+      const documentType = newDocumentKind === "diagram" ? "diagram" : newDocumentType;
+      const document = await projectStore.createDocument(projectPath, trimmed, documentType);
       setAddDocumentOpen(false);
       setNewDocumentName("");
+      setNewDocumentKind("text");
       setNewDocumentType("IDEA");
       setNewDocumentStatus(null);
       await refreshAll();
       navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`);
     } catch (error: any) {
       setNewDocumentStatus(typeof error === "string" ? error : error?.message || "Create failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openAddDiagramCard() {
+    if (!activeDocument || activeDocument.type !== "diagram") return;
+    setBusy(true);
+    try {
+      const latestDocument = await projectStore.loadDocument(projectPath, activeDocument.id);
+      setDocuments((current) => current.map((document) => (document.id === latestDocument.id ? latestDocument : document)));
+      setActiveDocument(latestDocument);
+      setDocumentMarkdown(latestDocument.markdown);
+      setDiagramMermaidDraft(latestDocument.mermaid || "");
+
+      const firstEntity = latestDocument.entities[0];
+      setDiagramEntityMode(firstEntity ? "existing" : "new");
+      setDiagramEntityId(firstEntity?.id || "");
+      setDiagramEntityName("");
+      setDiagramResponsibility(firstEntity?.responsibility || "");
+      setDiagramCollaboratorIds(firstEntity?.collaborators || []);
+      setDiagramNewCollaboratorName("");
+      setDiagramCardStatus(null);
+      setAddDiagramCardOpen(true);
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Failed to load latest diagram.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function pickDiagramEntity(entityId: string) {
+    const entity = activeDocument?.entities.find((item) => item.id === entityId);
+    setDiagramEntityId(entityId);
+    setDiagramResponsibility(entity?.responsibility || "");
+    setDiagramCollaboratorIds(entity?.collaborators || []);
+  }
+
+  function toggleDiagramCollaborator(entityId: string) {
+    setDiagramCollaboratorIds((current) =>
+      current.includes(entityId) ? current.filter((id) => id !== entityId) : [...current, entityId],
+    );
+  }
+
+  async function saveDiagramCard() {
+    if (!activeDocument || activeDocument.type !== "diagram") return;
+    setBusy(true);
+    try {
+      const latestDocument = await projectStore.loadDocument(projectPath, activeDocument.id);
+      const existingEntities = latestDocument.entities || [];
+      const editingExisting = diagramEntityMode === "existing";
+      const selectedEntity = existingEntities.find((entity) => entity.id === diagramEntityId);
+      const name = editingExisting ? selectedEntity?.name || "" : diagramEntityName.trim();
+      if (!name) {
+        setDiagramCardStatus("Entity name is required.");
+        return;
+      }
+
+      const entityId = editingExisting && selectedEntity ? selectedEntity.id : createLocalId(name);
+      const newCollaboratorName = diagramNewCollaboratorName.trim();
+      const newCollaborator: DiagramEntity | null = newCollaboratorName
+        ? {
+            id: createLocalId(newCollaboratorName),
+            name: newCollaboratorName,
+            responsibility: "",
+            collaborators: [],
+          }
+        : null;
+      const collaboratorIds = uniqueIds([
+        ...diagramCollaboratorIds.filter((id) => id !== entityId),
+        ...(newCollaborator ? [newCollaborator.id] : []),
+      ]);
+
+      const nextEntity: DiagramEntity = {
+        id: entityId,
+        name,
+        responsibility: diagramResponsibility.trim(),
+        collaborators: collaboratorIds,
+      };
+      const nextEntities = existingEntities.filter((entity) => entity.id !== entityId);
+      if (newCollaborator && !nextEntities.some((entity) => entity.id === newCollaborator.id)) {
+        nextEntities.push(newCollaborator);
+      }
+      nextEntities.push(nextEntity);
+
+      const saved = await projectStore.saveDiagramDocument(projectPath, activeDocument.id, nextEntities);
+      setDocuments((current) => current.map((document) => (document.id === saved.id ? saved : document)));
+      setActiveDocument(saved);
+      setDocumentMarkdown(saved.markdown);
+      setDiagramMermaidDraft(saved.mermaid || "");
+      setDiagramCodeEditing(false);
+      setAddDiagramCardOpen(false);
+      setDiagramCardStatus(null);
+      setStatus("Diagram saved.");
+    } catch (error: any) {
+      setDiagramCardStatus(typeof error === "string" ? error : error?.message || "Save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveDiagramCodeNow() {
+    if (!activeDocument || activeDocument.type !== "diagram") return;
+    setBusy(true);
+    try {
+      const saved = await projectStore.saveDiagramMermaid(projectPath, activeDocument.id, diagramMermaidDraft);
+      setDocuments((current) => current.map((document) => (document.id === saved.id ? saved : document)));
+      setActiveDocument(saved);
+      setDiagramMermaidDraft(saved.mermaid || "");
+      setDiagramCodeEditing(false);
+      setStatus("Diagram code saved.");
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Save failed.");
     } finally {
       setBusy(false);
     }
@@ -830,6 +964,18 @@ export default function ProjectWorkspace() {
           }
         >
           <div className="stack">
+            <div className="segmentedControl documentKindBar">
+              {(["text", "diagram"] as const).map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={"segmentedPill" + (newDocumentKind === kind ? " active" : "")}
+                  onClick={() => setNewDocumentKind(kind)}
+                >
+                  {kind === "text" ? "Text" : "Diagram"}
+                </button>
+              ))}
+            </div>
             <input
               autoFocus
               className="textInput"
@@ -837,16 +983,101 @@ export default function ProjectWorkspace() {
               placeholder="Document name"
               onChange={(event) => setNewDocumentName(event.target.value)}
             />
+            {newDocumentKind === "text" ? (
+              <select
+                className="selectInput"
+                value={newDocumentType}
+                onChange={(event) => setNewDocumentType(event.target.value as DocumentType)}
+              >
+                <option value="IDEA">IDEA</option>
+                <option value="PRD">PRD</option>
+                <option value="PLAN">PLAN</option>
+              </select>
+            ) : null}
+            {newDocumentStatus ? <div className="status">{newDocumentStatus}</div> : null}
+          </div>
+        </Modal>
+      ) : null}
+
+      {addDiagramCardOpen && activeDocument?.type === "diagram" ? (
+        <Modal
+          title="Add Card"
+          onClose={() => setAddDiagramCardOpen(false)}
+          footer={
+            <>
+              <button type="button" className="secondary" onClick={() => setAddDiagramCardOpen(false)}>
+                Cancel
+              </button>
+              <button type="button" className="primary" onClick={() => void saveDiagramCard()} disabled={busy}>
+                Save
+              </button>
+            </>
+          }
+        >
+          <div className="stack">
+            <label className="fieldLabel">Entity</label>
             <select
               className="selectInput"
-              value={newDocumentType}
-              onChange={(event) => setNewDocumentType(event.target.value as DocumentType)}
+              value={diagramEntityMode === "existing" ? diagramEntityId : "__new"}
+              onChange={(event) => {
+                if (event.target.value === "__new") {
+                  setDiagramEntityMode("new");
+                  setDiagramEntityId("");
+                  setDiagramResponsibility("");
+                  setDiagramCollaboratorIds([]);
+                } else {
+                  setDiagramEntityMode("existing");
+                  pickDiagramEntity(event.target.value);
+                }
+              }}
             >
-              <option value="IDEA">IDEA</option>
-              <option value="PRD">PRD</option>
-              <option value="PLAN">PLAN</option>
+              {activeDocument.entities.map((entity) => (
+                <option key={entity.id} value={entity.id}>
+                  {entity.name}
+                </option>
+              ))}
+              <option value="__new">+ New Entity</option>
             </select>
-            {newDocumentStatus ? <div className="status">{newDocumentStatus}</div> : null}
+            {diagramEntityMode === "new" ? (
+              <input
+                className="textInput"
+                value={diagramEntityName}
+                placeholder="Entity name"
+                onChange={(event) => setDiagramEntityName(event.target.value)}
+              />
+            ) : null}
+
+            <label className="fieldLabel">Responsibility</label>
+            <textarea
+              className="textInput diagramTextarea"
+              value={diagramResponsibility}
+              placeholder="Responsibility"
+              onChange={(event) => setDiagramResponsibility(event.target.value)}
+            />
+
+            <label className="fieldLabel">Collaborators</label>
+            <div className="diagramCollaboratorList">
+              {activeDocument.entities
+                .filter((entity) => entity.id !== diagramEntityId)
+                .map((entity) => (
+                  <label key={entity.id} className="diagramCollaborator">
+                    <input
+                      type="checkbox"
+                      checked={diagramCollaboratorIds.includes(entity.id)}
+                      onChange={() => toggleDiagramCollaborator(entity.id)}
+                    />
+                    <span>{entity.name}</span>
+                  </label>
+                ))}
+              {activeDocument.entities.length === 0 ? <div className="muted">No existing entities yet.</div> : null}
+            </div>
+            <input
+              className="textInput"
+              value={diagramNewCollaboratorName}
+              placeholder="+ New Collaborator"
+              onChange={(event) => setDiagramNewCollaboratorName(event.target.value)}
+            />
+            {diagramCardStatus ? <div className="status">{diagramCardStatus}</div> : null}
           </div>
         </Modal>
       ) : null}
@@ -1064,6 +1295,88 @@ export default function ProjectWorkspace() {
     }
 
     if (currentView === "document") {
+      if (activeDocument?.type === "diagram") {
+        return (
+          <FocusFrame
+            title={activeDocument.name}
+            description="Diagram document"
+            actions={
+              <div className="row">
+                <button
+                  type="button"
+                  className="iconButton"
+                  title="Copy Mermaid"
+                  aria-label="Copy Mermaid"
+                  onClick={() => void navigator.clipboard.writeText(diagramMermaidDraft)}
+                >
+                  <CopyIcon />
+                </button>
+                {diagramMode === "code" ? (
+                  <>
+                    <button
+                      type="button"
+                      className={"iconButton" + (diagramCodeEditing ? " active" : "")}
+                      title="Edit diagram code"
+                      aria-label="Edit diagram code"
+                      disabled={busy}
+                      onClick={() => setDiagramCodeEditing(true)}
+                    >
+                      <PencilIcon />
+                    </button>
+                    {diagramCodeEditing ? (
+                      <button
+                        type="button"
+                        className="iconButton iconButton-primary"
+                        title="Save diagram code"
+                        aria-label="Save diagram code"
+                        disabled={busy}
+                        onClick={() => void saveDiagramCodeNow()}
+                      >
+                        <SaveIcon />
+                      </button>
+                    ) : null}
+                  </>
+                ) : null}
+              </div>
+            }
+          >
+            <div className="diagramDocument">
+              <div className="segmentedControl diagramModeBar">
+                {(["diagram", "code"] as DiagramMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={"segmentedPill" + (diagramMode === mode ? " active" : "")}
+                    onClick={() => setDiagramMode(mode)}
+                  >
+                    {mode === "diagram" ? "DIAGRAM" : "CODE"}
+                  </button>
+                ))}
+              </div>
+              <div className="diagramViewport">
+                {diagramMode === "diagram" ? (
+                  <DiagramCanvas entities={activeDocument.entities || []} mermaid={activeDocument.mermaid || ""} />
+                ) : (
+                  <textarea
+                    className="documentEditor diagramCode"
+                    value={diagramMermaidDraft}
+                    onChange={(event) => setDiagramMermaidDraft(event.target.value)}
+                    readOnly={!diagramCodeEditing}
+                    spellCheck={false}
+                  />
+                )}
+              </div>
+              <div className="diagramFooter">
+                <button type="button" className="primary" onClick={openAddDiagramCard}>
+                  Add Card
+                </button>
+              </div>
+            </div>
+            {status ? <div className="workspaceStatus">{status}</div> : null}
+          </FocusFrame>
+        );
+      }
+
       return (
         <FocusFrame
           title={activeDocument?.name || "Document"}
@@ -1181,9 +1494,6 @@ export default function ProjectWorkspace() {
             <div className="surfaceCopy">
               Create a document first. That selected document becomes the source of truth for current queries.
             </div>
-            <button type="button" className="primary" onClick={() => setAddDocumentOpen(true)}>
-              Add Document
-            </button>
           </div>
         )}
         {status ? <div className="workspaceStatus">{status}</div> : null}
@@ -1198,6 +1508,124 @@ function NavButton(props: { active: boolean; label: string; onClick: () => void 
       {props.label}
     </button>
   );
+}
+
+type RenderedDiagramNode = {
+  id: string;
+  name: string;
+  responsibility: string;
+};
+
+function DiagramCanvas(props: { entities: DiagramEntity[]; mermaid: string }) {
+  const parsed = parseMermaidDiagram(props.mermaid);
+  const nodes = parsed.nodes.length > 0
+    ? parsed.nodes
+    : props.entities.map((entity) => ({
+        id: entity.id,
+        name: entity.name,
+        responsibility: entity.responsibility,
+      }));
+  const relationships = parsed.nodes.length > 0
+    ? parsed.relationships
+    : props.entities.flatMap((entity) =>
+        entity.collaborators.map((collaboratorId) => ({
+          sourceId: entity.id,
+          targetId: collaboratorId,
+        })),
+      );
+
+  if (nodes.length === 0) {
+    return (
+      <div className="diagramEmpty">
+        <div className="surfaceTitle">No cards yet</div>
+        <div className="surfaceCopy">Add a card to create the first diagram entity.</div>
+      </div>
+    );
+  }
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const renderedRelationships = relationships
+    .map((relationship) => ({
+      source: nodeById.get(relationship.sourceId),
+      target: nodeById.get(relationship.targetId),
+    }))
+    .filter((relationship): relationship is { source: RenderedDiagramNode; target: RenderedDiagramNode } =>
+      Boolean(relationship.source && relationship.target),
+    );
+  const connectedIds = new Set(renderedRelationships.flatMap((relationship) => [relationship.source.id, relationship.target.id]));
+  const standalone = nodes.filter((node) => !connectedIds.has(node.id));
+
+  return (
+    <div className="diagramCanvas" aria-label="Rendered Mermaid diagram">
+      {renderedRelationships.map((relationship) => (
+        <div key={`${relationship.source.id}-${relationship.target.id}`} className="diagramRelationship">
+          <DiagramNode node={relationship.source} />
+          <div className="diagramArrow" aria-hidden="true" />
+          <DiagramNode node={relationship.target} />
+        </div>
+      ))}
+      {standalone.length > 0 ? (
+        <div className="diagramStandalone">
+          {standalone.map((node) => (
+            <DiagramNode key={node.id} node={node} />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function DiagramNode(props: { node: RenderedDiagramNode }) {
+  return (
+    <div className="diagramNode">
+      <div className="diagramNodeName">{props.node.name}</div>
+      <div className="diagramNodeResponsibility">
+        Responsibility: {props.node.responsibility || "Unassigned"}
+      </div>
+    </div>
+  );
+}
+
+function parseMermaidDiagram(mermaid: string): {
+  nodes: RenderedDiagramNode[];
+  relationships: Array<{ sourceId: string; targetId: string }>;
+} {
+  const nodes = new Map<string, RenderedDiagramNode>();
+  const relationships: Array<{ sourceId: string; targetId: string }> = [];
+
+  for (const line of mermaid.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("flowchart") || trimmed.startsWith("graph")) continue;
+
+    const relationshipMatch = /^([A-Za-z0-9_:-]+)\s*-->\s*([A-Za-z0-9_:-]+)/.exec(trimmed);
+    if (relationshipMatch) {
+      relationships.push({ sourceId: relationshipMatch[1], targetId: relationshipMatch[2] });
+      continue;
+    }
+
+    const nodeMatch = /^([A-Za-z0-9_:-]+)\s*\[\s*"([^"]*)"\s*\]/.exec(trimmed);
+    if (nodeMatch) {
+      const label = nodeMatch[2].replace(/<br\s*\/?>/gi, "\n").replace(/\\"/g, '"');
+      const lines = label.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+      const responsibilityLine = lines.find((item) => item.toLowerCase().startsWith("responsibility:"));
+      nodes.set(nodeMatch[1], {
+        id: nodeMatch[1],
+        name: lines[0] || nodeMatch[1],
+        responsibility: responsibilityLine?.replace(/^responsibility:\s*/i, "") || "",
+      });
+    }
+  }
+
+  for (const relationship of relationships) {
+    if (!nodes.has(relationship.sourceId)) {
+      nodes.set(relationship.sourceId, { id: relationship.sourceId, name: relationship.sourceId, responsibility: "" });
+    }
+    if (!nodes.has(relationship.targetId)) {
+      nodes.set(relationship.targetId, { id: relationship.targetId, name: relationship.targetId, responsibility: "" });
+    }
+  }
+
+  return { nodes: [...nodes.values()], relationships };
 }
 
 function FocusFrame(props: {
@@ -1263,6 +1691,19 @@ function formatTime(value: string) {
 function isReferenceFile(name: string) {
   const lowered = name.toLowerCase();
   return acceptedReferenceTypes.some((suffix) => lowered.endsWith(suffix));
+}
+
+function createLocalId(name: string) {
+  const slug = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${slug || "entity"}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function uniqueIds(ids: string[]) {
+  return ids.filter((id, index) => id && ids.indexOf(id) === index);
 }
 
 function chatModeLabel(mode: ChatMode) {
