@@ -85,6 +85,10 @@ export default function ProjectWorkspace() {
   const [newDocumentKind, setNewDocumentKind] = React.useState<"text" | "diagram">("text");
   const [newDocumentType, setNewDocumentType] = React.useState<DocumentType>("IDEA");
   const [newDocumentStatus, setNewDocumentStatus] = React.useState<string | null>(null);
+  const [repositoryPanelOpen, setRepositoryPanelOpen] = React.useState(false);
+  const [repositoryInput, setRepositoryInput] = React.useState("");
+  const [repositoryProcessing, setRepositoryProcessing] = React.useState(false);
+  const [repositoryStatus, setRepositoryStatus] = React.useState<string | null>(null);
   const [diagramMode, setDiagramMode] = React.useState<DiagramMode>("diagram");
   const [diagramMermaidDraft, setDiagramMermaidDraft] = React.useState("");
   const [diagramCodeEditing, setDiagramCodeEditing] = React.useState(false);
@@ -830,6 +834,27 @@ export default function ProjectWorkspace() {
     }
   }
 
+  async function processRepositoryReferenceNow() {
+    const trimmed = repositoryInput.trim();
+    if (!trimmed) {
+      setRepositoryStatus("Enter a GitHub repo URL or git clone command.");
+      return;
+    }
+
+    setRepositoryProcessing(true);
+    setRepositoryStatus("Cloning and processing repository...");
+    try {
+      const reference = await projectStore.processRepositoryReference(projectPath, trimmed);
+      setRepositoryInput("");
+      setRepositoryStatus(`${reference.fileName} indexed as a repository reference.`);
+      await refreshAll();
+    } catch (error: any) {
+      setRepositoryStatus(typeof error === "string" ? error : error?.message || "Repository processing failed.");
+    } finally {
+      setRepositoryProcessing(false);
+    }
+  }
+
   return (
     <div
       className={
@@ -863,11 +888,6 @@ export default function ProjectWorkspace() {
               >
                 Context: {activeDocument?.name || "No document selected"}
               </button>
-              <NavButton
-                active={currentView === "references"}
-                label={`References (${references.length})`}
-                onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/references`)}
-              />
             </div>
 
             <div className="workspaceNavBlock workspaceNavFill">
@@ -885,6 +905,22 @@ export default function ProjectWorkspace() {
                   </button>
                 ))}
                 {sourceDocuments.length === 0 ? <div className="documentNavEmpty">No documents yet</div> : null}
+              </div>
+              <div className="workspaceNavLabel workspaceNavLabelPrimary">References</div>
+              <div className="documentList" aria-label="References">
+                {references.map((reference) => (
+                  <button
+                    key={reference.id}
+                    type="button"
+                    className={"documentNavItem referenceNavItem" + (currentView === "references" ? " active" : "")}
+                    onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/references`)}
+                    title={reference.fileName}
+                  >
+                    <span className="documentType">REF</span>
+                    <span className="documentName">{reference.fileName}</span>
+                  </button>
+                ))}
+                {references.length === 0 ? <div className="documentNavEmpty">No references yet</div> : null}
               </div>
               <div className="workspaceNavLabel">Plans</div>
               <div className="documentList" aria-label="Plans">
@@ -1382,14 +1418,41 @@ export default function ProjectWorkspace() {
           actions={
             <div className="row">
               <button type="button" className="secondary" onClick={() => filesInputRef.current?.click()}>
-                Add Files
+                Add File
               </button>
               <button type="button" className="secondary" onClick={() => folderInputRef.current?.click()}>
                 Add Folder
               </button>
+              <button type="button" className="secondary" onClick={() => setRepositoryPanelOpen(true)}>
+                Add Repository
+              </button>
             </div>
           }
         >
+          {repositoryPanelOpen ? (
+            <div className="referenceRepositoryPanel">
+              <label className="fieldLabel" htmlFor="repository-reference-input">Repository URL or clone command</label>
+              <div className="repositoryInputRow">
+                <input
+                  id="repository-reference-input"
+                  className="textInput"
+                  value={repositoryInput}
+                  onChange={(event) => setRepositoryInput(event.target.value)}
+                  placeholder="git clone https://github.com/org/repo.git"
+                  disabled={repositoryProcessing}
+                />
+                <button
+                  type="button"
+                  className="primary"
+                  disabled={repositoryProcessing || !repositoryInput.trim()}
+                  onClick={() => void processRepositoryReferenceNow()}
+                >
+                  {repositoryProcessing ? "Processing..." : "Process Repository"}
+                </button>
+              </div>
+              {repositoryStatus ? <div className="status">{repositoryStatus}</div> : null}
+            </div>
+          ) : null}
           <ReferenceDropZone
             onFiles={(files) => void handlePickedFiles(files)}
             onPickFiles={() => filesInputRef.current?.click()}
@@ -1400,7 +1463,10 @@ export default function ProjectWorkspace() {
                 <div className="referenceHeader">
                   <div>
                     <div className="reviewCardTitle">{reference.fileName}</div>
-                    <div className="feedMeta">{reference.filePath || "Uploaded reference"}</div>
+                    <div className="feedMeta">
+                      Type: {reference.type === "repository" ? "Repository Summary" : "File"} · Status: Indexed
+                    </div>
+                    <div className="feedMeta">{reference.sourceUrl || reference.filePath || "Uploaded reference"}</div>
                   </div>
                   <label className="referenceToggle">
                     <input type="checkbox" checked={reference.isSelected} onChange={() => void toggleReference(reference)} />

@@ -34,12 +34,15 @@ export type DiagramEntity = {
 export type ProjectReference = {
   id: string;
   projectId: string;
+  type: "file" | "repository";
   fileName: string;
   filePath: string | null;
   extractedText: string | null;
   summary: string | null;
+  sourceUrl: string | null;
   isSelected: boolean;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type RetrievedMemoryChunk = {
@@ -76,10 +79,12 @@ export type AgentCard = {
 };
 
 export type NewReferenceInput = {
+  type?: "file" | "repository";
   fileName: string;
   filePath: string | null;
   extractedText: string | null;
   summary: string | null;
+  sourceUrl?: string | null;
 };
 
 export type NewAgentCardInput = {
@@ -122,6 +127,7 @@ export type ProjectStore = {
   listDecisions(projectPath: string): Promise<Decision[]>;
   listReferences(projectPath: string): Promise<ProjectReference[]>;
   addReferences(projectPath: string, references: NewReferenceInput[]): Promise<ProjectReference[]>;
+  processRepositoryReference(projectPath: string, input: string): Promise<ProjectReference>;
   updateReference(
     projectPath: string,
     referenceId: string,

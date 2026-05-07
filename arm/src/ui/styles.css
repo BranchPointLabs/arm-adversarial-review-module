@@ -259,6 +259,11 @@ button:disabled {
   color: var(--muted);
 }
 
+.workspaceNavLabelPrimary {
+  color: var(--ink);
+  font-weight: 900;
+}
+
 .workspaceProjectContext {
   padding: 4px 2px 2px;
   font-size: 14px;
@@ -315,6 +320,10 @@ button:disabled {
 .documentNavItem:hover {
   border-color: var(--line-strong);
   background: var(--panel);
+}
+
+.referenceNavItem .documentName {
+  font-weight: 700;
 }
 
 .documentNavEmpty {
@@ -1472,6 +1481,22 @@ textarea.miniEditor {
   font-weight: 800;
   text-transform: uppercase;
   color: var(--muted);
+}
+
+.referenceRepositoryPanel {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.repositoryInputRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
 }
 
 .diagramTextarea {

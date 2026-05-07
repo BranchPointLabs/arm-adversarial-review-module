@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -83,12 +84,16 @@ struct ProjectDocument {
 struct ProjectReference {
   id: String,
   project_id: String,
+  #[serde(rename = "type")]
+  reference_type: String,
   file_name: String,
   file_path: Option<String>,
   extracted_text: Option<String>,
   summary: Option<String>,
+  source_url: Option<String>,
   is_selected: bool,
   created_at: String,
+  updated_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -124,10 +129,19 @@ struct AgentCard {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NewReferenceInput {
+  #[serde(rename = "type")]
+  reference_type: Option<String>,
   file_name: String,
   file_path: Option<String>,
   extracted_text: Option<String>,
   summary: Option<String>,
+  source_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepositoryReferenceInput {
+  input: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -560,7 +574,7 @@ fn list_references(project_path: String) -> Result<Vec<ProjectReference>, String
 
   let mut stmt = conn
     .prepare(
-      "SELECT id, project_id, file_name, file_path, extracted_text, summary, is_selected, created_at
+      "SELECT id, project_id, reference_type, file_name, file_path, extracted_text, summary, source_url, is_selected, created_at, updated_at
        FROM project_references
        ORDER BY created_at DESC",
     )
@@ -591,18 +605,22 @@ fn add_references(project_path: String, references: Vec<NewReferenceInput>) -> R
     }
 
     let id = Uuid::new_v4().to_string();
+    let reference_type = normalize_reference_type(reference.reference_type.as_deref());
     conn
       .execute(
-        "INSERT INTO project_references (id, project_id, file_name, file_path, extracted_text, summary, is_selected, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO project_references (id, project_id, reference_type, file_name, file_path, extracted_text, summary, source_url, is_selected, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
         params![
           id,
           project_id,
+          reference_type,
           file_name,
           reference.file_path,
           reference.extracted_text,
           reference.summary,
+          reference.source_url,
           1,
+          now,
           now
         ],
       )
@@ -611,12 +629,15 @@ fn add_references(project_path: String, references: Vec<NewReferenceInput>) -> R
     created.push(ProjectReference {
       id,
       project_id: project_id.clone(),
+      reference_type: reference_type.to_string(),
       file_name: file_name.to_string(),
       file_path: reference.file_path,
       extracted_text: reference.extracted_text,
       summary: reference.summary,
+      source_url: reference.source_url,
       is_selected: true,
       created_at: now.clone(),
+      updated_at: now.clone(),
     });
   }
 
@@ -625,6 +646,59 @@ fn add_references(project_path: String, references: Vec<NewReferenceInput>) -> R
     schedule_memory_reindex(project_path.clone(), MemorySourceKind::Reference, reference.id.clone());
   }
   Ok(created)
+}
+
+#[command]
+fn process_repository_reference(project_path: String, input: RepositoryReferenceInput) -> Result<ProjectReference, String> {
+  let project_path = PathBuf::from(project_path);
+  let repo_url = normalize_repo_input(&input.input)?;
+  let repo_name = repo_name_from_url(&repo_url)?;
+  let repo_root = project_path.join("repos").join(&repo_name);
+  let reference_path = project_path.join("references").join(format!("{}.md", repo_name));
+
+  if repo_root.exists() {
+    assert_child_path(&project_path.join("repos"), &repo_root)?;
+    fs::remove_dir_all(&repo_root).map_err(to_err)?;
+  }
+  fs::create_dir_all(repo_root.parent().ok_or_else(|| "Invalid repository path.".to_string())?).map_err(to_err)?;
+
+  let output = Command::new("git")
+    .args(["clone", "--depth", "1", &repo_url])
+    .arg(&repo_root)
+    .output()
+    .map_err(|error| format!("Failed to run git clone: {}", error))?;
+
+  if !output.status.success() {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    return Err(format!("Git clone failed: {}", stderr.trim()));
+  }
+
+  let scanned = scan_repository(&repo_root)?;
+  let markdown = build_repo_reference_markdown(&repo_name, &repo_url, &scanned);
+  fs::create_dir_all(reference_path.parent().ok_or_else(|| "Invalid reference path.".to_string())?).map_err(to_err)?;
+  fs::write(&reference_path, &markdown).map_err(to_err)?;
+
+  let conn = open_project_conn(&project_path)?;
+  let project_id = get_project_id(&conn).map_err(to_err)?;
+  remove_existing_repo_references(&conn, &repo_url, &format!("{}.md", repo_name))?;
+
+  let now = Utc::now().to_rfc3339();
+  let reference_id = Uuid::new_v4().to_string();
+  let file_name = format!("{}.md", repo_name);
+  let summary = repo_reference_short_summary(&repo_name, &scanned);
+  let file_path = reference_path.to_string_lossy().to_string();
+
+  conn
+    .execute(
+      "INSERT INTO project_references (id, project_id, reference_type, file_name, file_path, extracted_text, summary, source_url, is_selected, created_at, updated_at)
+       VALUES (?1, ?2, 'repository', ?3, ?4, ?5, ?6, ?7, 1, ?8, ?8)",
+      params![reference_id, project_id, file_name, file_path, markdown, summary, repo_url, now],
+    )
+    .map_err(to_err)?;
+  touch_project(&conn, &now).map_err(to_err)?;
+  schedule_memory_reindex(project_path.clone(), MemorySourceKind::Reference, reference_id.clone());
+
+  load_reference(&conn, &reference_id)
 }
 
 #[command]
@@ -639,8 +713,8 @@ fn update_reference(project_path: String, reference_id: String, patch: Reference
   let is_selected = patch.is_selected.unwrap_or(current.is_selected);
   conn
     .execute(
-      "UPDATE project_references SET summary=?1, extracted_text=?2, is_selected=?3 WHERE id=?4",
-      params![summary, extracted_text, bool_to_int(is_selected), reference_id],
+      "UPDATE project_references SET summary=?1, extracted_text=?2, is_selected=?3, updated_at=?4 WHERE id=?5",
+      params![summary, extracted_text, bool_to_int(is_selected), Utc::now().to_rfc3339(), reference_id],
     )
     .map_err(to_err)?;
   let now = Utc::now().to_rfc3339();
@@ -866,12 +940,15 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     CREATE TABLE IF NOT EXISTS project_references (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
+      reference_type TEXT NOT NULL DEFAULT 'file',
       file_name TEXT NOT NULL,
       file_path TEXT,
       extracted_text TEXT,
       summary TEXT,
+      source_url TEXT,
       is_selected INTEGER NOT NULL DEFAULT 1,
-      created_at TEXT NOT NULL
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE IF NOT EXISTS agent_runs (
       id TEXT PRIMARY KEY,
@@ -937,11 +1014,28 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     .and_then(|mut stmt| stmt.exists([]))
     .is_ok();
   if !has_selected {
-    let _ = conn.execute(
-      "ALTER TABLE project_references ADD COLUMN is_selected INTEGER NOT NULL DEFAULT 1",
-      [],
-    );
+  let _ = conn.execute(
+    "ALTER TABLE project_references ADD COLUMN is_selected INTEGER NOT NULL DEFAULT 1",
+    [],
+  );
   }
+
+  let _ = conn.execute(
+    "ALTER TABLE project_references ADD COLUMN reference_type TEXT NOT NULL DEFAULT 'file'",
+    [],
+  );
+  let _ = conn.execute(
+    "ALTER TABLE project_references ADD COLUMN source_url TEXT",
+    [],
+  );
+  let _ = conn.execute(
+    "ALTER TABLE project_references ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''",
+    [],
+  );
+  let _ = conn.execute(
+    "UPDATE project_references SET updated_at=created_at WHERE updated_at=''",
+    [],
+  );
 
   let _ = conn.execute(
     "ALTER TABLE agent_cards ADD COLUMN source_document_title TEXT",
@@ -994,6 +1088,388 @@ fn touch_project(conn: &Connection, timestamp: &str) -> rusqlite::Result<()> {
   Ok(())
 }
 
+#[derive(Debug)]
+struct RepoFileSignal {
+  path: String,
+  content: String,
+}
+
+fn normalize_reference_type(value: Option<&str>) -> &'static str {
+  match value.unwrap_or("file").trim().to_lowercase().as_str() {
+    "repository" => "repository",
+    _ => "file",
+  }
+}
+
+fn normalize_repo_input(input: &str) -> Result<String, String> {
+  let trimmed = input.trim();
+  if trimmed.is_empty() {
+    return Err("Enter a repository URL or git clone command.".to_string());
+  }
+  let candidate = if trimmed.to_lowercase().starts_with("git clone ") {
+    trimmed
+      .split_whitespace()
+      .find(|part| part.starts_with("https://") || part.starts_with("http://") || part.starts_with("git@"))
+      .unwrap_or("")
+  } else {
+    trimmed
+  };
+
+  if !candidate.starts_with("https://github.com/") {
+    return Err("Only HTTPS GitHub repository URLs are supported in this version.".to_string());
+  }
+
+  let without_fragment = candidate.split('#').next().unwrap_or(candidate);
+  let without_query = without_fragment.split('?').next().unwrap_or(without_fragment);
+  let normalized = without_query.trim_end_matches('/').to_string();
+  if normalized.split('/').count() < 5 {
+    return Err("Repository URL must look like https://github.com/org/repo.git.".to_string());
+  }
+  Ok(normalized)
+}
+
+fn repo_name_from_url(repo_url: &str) -> Result<String, String> {
+  let name = repo_url
+    .trim_end_matches('/')
+    .rsplit('/')
+    .next()
+    .unwrap_or("")
+    .trim_end_matches(".git")
+    .trim();
+  let safe = name
+    .chars()
+    .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+    .collect::<String>();
+  if safe.is_empty() {
+    return Err("Could not derive repository name from URL.".to_string());
+  }
+  Ok(safe)
+}
+
+fn assert_child_path(parent: &Path, child: &Path) -> Result<(), String> {
+  let parent_abs = parent.canonicalize().map_err(to_err)?;
+  let child_parent = child.parent().ok_or_else(|| "Invalid child path.".to_string())?;
+  let child_parent_abs = child_parent.canonicalize().map_err(to_err)?;
+  if !child_parent_abs.starts_with(parent_abs) {
+    return Err("Refusing to modify a path outside project repository storage.".to_string());
+  }
+  Ok(())
+}
+
+fn remove_existing_repo_references(conn: &Connection, repo_url: &str, file_name: &str) -> Result<(), String> {
+  let ids = conn
+    .prepare("SELECT id FROM project_references WHERE reference_type='repository' AND (source_url=?1 OR file_name=?2)")
+    .map_err(to_err)?
+    .query_map(params![repo_url, file_name], |row| row.get::<_, String>(0))
+    .map_err(to_err)?
+    .filter_map(Result::ok)
+    .collect::<Vec<_>>();
+
+  for id in ids {
+    conn
+      .execute("DELETE FROM project_references WHERE id=?1", params![id.clone()])
+      .map_err(to_err)?;
+    remove_memory_document(conn, MemorySourceKind::Reference, &id).map_err(to_err)?;
+  }
+  Ok(())
+}
+
+fn scan_repository(repo_root: &Path) -> Result<Vec<RepoFileSignal>, String> {
+  let mut files = Vec::new();
+  scan_repository_dir(repo_root, repo_root, &mut files)?;
+  files.sort_by_key(|file| repo_file_rank(&file.path));
+  files.truncate(80);
+  Ok(files)
+}
+
+fn scan_repository_dir(repo_root: &Path, dir: &Path, files: &mut Vec<RepoFileSignal>) -> Result<(), String> {
+  if files.len() >= 120 {
+    return Ok(());
+  }
+
+  for entry in fs::read_dir(dir).map_err(to_err)? {
+    let entry = entry.map_err(to_err)?;
+    let path = entry.path();
+    let name = entry.file_name().to_string_lossy().to_string();
+    if path.is_dir() {
+      if is_excluded_repo_dir(&name) {
+        continue;
+      }
+      scan_repository_dir(repo_root, &path, files)?;
+      continue;
+    }
+
+    let relative = path.strip_prefix(repo_root).unwrap_or(&path).to_string_lossy().replace('\\', "/");
+    if !is_high_signal_repo_file(&relative) {
+      continue;
+    }
+    let metadata = fs::metadata(&path).map_err(to_err)?;
+    if metadata.len() > 220_000 {
+      continue;
+    }
+    let content = fs::read_to_string(&path).unwrap_or_default();
+    if content.trim().is_empty() || looks_generated_or_minified(&content) {
+      continue;
+    }
+    files.push(RepoFileSignal {
+      path: relative,
+      content: truncate_repo_content(&content, 2400),
+    });
+  }
+
+  Ok(())
+}
+
+fn is_excluded_repo_dir(name: &str) -> bool {
+  matches!(
+    name,
+    ".git" | "node_modules" | ".next" | "dist" | "build" | "target" | "coverage" | ".turbo" | ".cache" | "out"
+  )
+}
+
+fn is_high_signal_repo_file(path: &str) -> bool {
+  let lower = path.to_lowercase();
+  let file = lower.rsplit('/').next().unwrap_or(&lower);
+  if file.ends_with(".lock") || file.ends_with(".min.js") || file.ends_with(".map") {
+    return false;
+  }
+  if matches!(
+    file,
+    "readme.md" | "package.json" | "tsconfig.json" | "firebase.json" | "schema.prisma" | "dockerfile"
+  ) {
+    return true;
+  }
+  if file.starts_with("next.config.") || file.starts_with("vite.config.") || file.starts_with("schema.") {
+    return true;
+  }
+  if lower.starts_with("docs/") || lower.contains("/docs/") || lower.starts_with("adr/") || lower.contains("/adr/") {
+    return true;
+  }
+  if lower.starts_with("architecture/") || lower.contains("/architecture/") {
+    return true;
+  }
+  if lower.contains("/api/") || lower.contains("/routes/") || lower.contains("/pages/api/") {
+    return is_text_code_file(file);
+  }
+  if lower.contains("test") || lower.contains("spec") {
+    return is_text_code_file(file);
+  }
+  if lower.contains("type") || lower.contains("interface") || lower.contains("model") || lower.contains("schema") || lower.contains("dto") {
+    return is_text_code_file(file);
+  }
+  false
+}
+
+fn is_text_code_file(file: &str) -> bool {
+  [".ts", ".tsx", ".js", ".jsx", ".rs", ".go", ".py", ".java", ".cs", ".json", ".md", ".sql", ".prisma"]
+    .iter()
+    .any(|suffix| file.ends_with(suffix))
+}
+
+fn looks_generated_or_minified(content: &str) -> bool {
+  let first_lines = content.lines().take(20).collect::<Vec<_>>().join("\n").to_lowercase();
+  if first_lines.contains("generated") || first_lines.contains("do not edit") {
+    return true;
+  }
+  let long_lines = content.lines().filter(|line| line.len() > 500).count();
+  long_lines > 3
+}
+
+fn repo_file_rank(path: &str) -> usize {
+  let lower = path.to_lowercase();
+  if lower.ends_with("readme.md") {
+    return 0;
+  }
+  if lower == "package.json" {
+    return 1;
+  }
+  if lower.starts_with("docs/") || lower.contains("/docs/") {
+    return 2;
+  }
+  if lower.contains("schema") || lower.contains("model") || lower.contains("type") {
+    return 3;
+  }
+  if lower.contains("/api/") || lower.contains("/routes/") {
+    return 4;
+  }
+  if lower.contains("test") || lower.contains("spec") {
+    return 5;
+  }
+  10
+}
+
+fn build_repo_reference_markdown(repo_name: &str, repo_url: &str, files: &[RepoFileSignal]) -> String {
+  let paths = files.iter().map(|file| file.path.as_str()).collect::<Vec<_>>();
+  let stack = detect_repo_stack(files);
+  let overview = detect_repo_overview(repo_name, files);
+  let useful = paths.iter().take(24).map(|path| format!("- `{}`", path)).collect::<Vec<_>>().join("\n");
+
+  format!(
+    "# {repo_name}\n\n\
+## Repository Source\n{repo_url}\n\n\
+## Overview\n{overview}\n\n\
+## Stack\n{stack}\n\n\
+## Project Structure\n{structure}\n\n\
+## Entry Points\n{entry_points}\n\n\
+## Domain Models\n{domain_models}\n\n\
+## API / Service Boundaries\n{api_boundaries}\n\n\
+## Data Persistence\n{persistence}\n\n\
+## UI Screens / Routes\n{ui_routes}\n\n\
+## Tests / Expected Behavior\n{tests}\n\n\
+## Important Implementation Signals\n{signals}\n\n\
+## Risks / Gaps\n{risks}\n\n\
+## Useful Files\n{useful}\n",
+    repo_name = repo_name,
+    repo_url = repo_url,
+    overview = overview,
+    stack = stack,
+    structure = summarize_paths(&paths, &["src/", "app/", "pages/", "components/", "docs/", "server/", "api/"]),
+    entry_points = summarize_matching_paths(&paths, &["main.", "index.", "app.", "server.", "route.", "page."]),
+    domain_models = summarize_matching_paths(&paths, &["model", "type", "interface", "schema", "dto", ".prisma"]),
+    api_boundaries = summarize_matching_paths(&paths, &["/api/", "/routes/", "service", "client", "handler"]),
+    persistence = summarize_matching_paths(&paths, &["prisma", "schema", "migration", "repository", "database", "firebase", "sql"]),
+    ui_routes = summarize_matching_paths(&paths, &["/pages/", "/app/", "/routes/", "screen", "view", "component"]),
+    tests = summarize_matching_paths(&paths, &["test", "spec", "__tests__"]),
+    signals = summarize_implementation_signals(files),
+    risks = summarize_repo_risks(files),
+    useful = if useful.is_empty() { "- No high-signal files found.".to_string() } else { useful },
+  )
+}
+
+fn repo_reference_short_summary(repo_name: &str, files: &[RepoFileSignal]) -> String {
+  format!(
+    "Repository summary for {}. Indexed {} high-signal files for review, chat, planning, and context retrieval.",
+    repo_name,
+    files.len()
+  )
+}
+
+fn detect_repo_overview(repo_name: &str, files: &[RepoFileSignal]) -> String {
+  if let Some(readme) = files.iter().find(|file| file.path.to_lowercase().ends_with("readme.md")) {
+    let first = readme
+      .content
+      .lines()
+      .map(|line| line.trim().trim_start_matches('#').trim())
+      .find(|line| line.len() > 20)
+      .unwrap_or("");
+    if !first.is_empty() {
+      return first.to_string();
+    }
+  }
+  format!("{} appears to be an application repository. ARM processed high-signal project files into this reference summary.", repo_name)
+}
+
+fn detect_repo_stack(files: &[RepoFileSignal]) -> String {
+  let all = files.iter().map(|file| format!("{}\n{}", file.path, file.content)).collect::<Vec<_>>().join("\n").to_lowercase();
+  let mut stack = Vec::new();
+  for (needle, label) in [
+    ("react", "React"),
+    ("vite", "Vite"),
+    ("next", "Next.js"),
+    ("tauri", "Tauri"),
+    ("typescript", "TypeScript"),
+    ("firebase", "Firebase"),
+    ("prisma", "Prisma"),
+    ("sqlite", "SQLite"),
+    ("express", "Express"),
+    ("rust", "Rust"),
+  ] {
+    if all.contains(needle) {
+      stack.push(label);
+    }
+  }
+  if stack.is_empty() {
+    "- No dominant stack detected from high-signal files.".to_string()
+  } else {
+    stack.into_iter().map(|item| format!("- {}", item)).collect::<Vec<_>>().join("\n")
+  }
+}
+
+fn summarize_paths(paths: &[&str], prefixes: &[&str]) -> String {
+  let matches = paths
+    .iter()
+    .filter(|path| prefixes.iter().any(|prefix| path.to_lowercase().starts_with(prefix) || path.to_lowercase().contains(&format!("/{}", prefix))))
+    .take(12)
+    .map(|path| format!("- `{}`", path))
+    .collect::<Vec<_>>();
+  if matches.is_empty() {
+    "- No clear signal found in scanned files.".to_string()
+  } else {
+    matches.join("\n")
+  }
+}
+
+fn summarize_matching_paths(paths: &[&str], needles: &[&str]) -> String {
+  let matches = paths
+    .iter()
+    .filter(|path| {
+      let lower = path.to_lowercase();
+      needles.iter().any(|needle| lower.contains(needle))
+    })
+    .take(14)
+    .map(|path| format!("- `{}`", path))
+    .collect::<Vec<_>>();
+  if matches.is_empty() {
+    "- No clear signal found in scanned files.".to_string()
+  } else {
+    matches.join("\n")
+  }
+}
+
+fn summarize_implementation_signals(files: &[RepoFileSignal]) -> String {
+  let mut signals = Vec::new();
+  for file in files {
+    let lower = file.content.to_lowercase();
+    if lower.contains("todo") {
+      signals.push(format!("- `{}` contains TODO markers.", file.path));
+    }
+    if lower.contains("auth") || lower.contains("login") {
+      signals.push(format!("- `{}` contains authentication/session language.", file.path));
+    }
+    if lower.contains("route") || lower.contains("api") {
+      signals.push(format!("- `{}` appears to define routing or service boundaries.", file.path));
+    }
+    if signals.len() >= 10 {
+      break;
+    }
+  }
+  if signals.is_empty() {
+    "- High-signal files were indexed, but no specific implementation warnings stood out in the lightweight scan.".to_string()
+  } else {
+    signals.join("\n")
+  }
+}
+
+fn summarize_repo_risks(files: &[RepoFileSignal]) -> String {
+  let has_tests = files.iter().any(|file| {
+    let lower = file.path.to_lowercase();
+    lower.contains("test") || lower.contains("spec")
+  });
+  let has_readme = files.iter().any(|file| file.path.to_lowercase().ends_with("readme.md"));
+  let has_schema = files.iter().any(|file| file.path.to_lowercase().contains("schema") || file.path.to_lowercase().contains("model"));
+  let mut risks = Vec::new();
+  if !has_tests {
+    risks.push("- No high-signal test files were found in the scanned subset.");
+  }
+  if !has_readme {
+    risks.push("- No README was found, so repository intent may be inferred from structure only.");
+  }
+  if !has_schema {
+    risks.push("- No obvious schema/model files were found in the scanned subset.");
+  }
+  if risks.is_empty() {
+    risks.push("- No major repository-level gaps detected by the lightweight scan.");
+  }
+  risks.join("\n")
+}
+
+fn truncate_repo_content(content: &str, max_chars: usize) -> String {
+  if content.len() <= max_chars {
+    return content.to_string();
+  }
+  format!("{}\n\n[Truncated]", &content[..max_chars])
+}
+
 fn get_project_id(conn: &Connection) -> rusqlite::Result<String> {
   conn.query_row("SELECT id FROM projects LIMIT 1", [], |row| row.get(0))
 }
@@ -1001,7 +1477,7 @@ fn get_project_id(conn: &Connection) -> rusqlite::Result<String> {
 fn load_reference(conn: &Connection, reference_id: &str) -> Result<ProjectReference, String> {
   conn
     .query_row(
-      "SELECT id, project_id, file_name, file_path, extracted_text, summary, is_selected, created_at
+      "SELECT id, project_id, reference_type, file_name, file_path, extracted_text, summary, source_url, is_selected, created_at, updated_at
        FROM project_references WHERE id=?1",
       params![reference_id],
       map_reference,
@@ -1060,12 +1536,15 @@ fn map_reference(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectReference> 
   Ok(ProjectReference {
     id: row.get(0)?,
     project_id: row.get(1)?,
-    file_name: row.get(2)?,
-    file_path: row.get(3)?,
-    extracted_text: row.get(4)?,
-    summary: row.get(5)?,
-    is_selected: int_to_bool(row.get::<_, i64>(6)?),
-    created_at: row.get(7)?,
+    reference_type: row.get(2)?,
+    file_name: row.get(3)?,
+    file_path: row.get(4)?,
+    extracted_text: row.get(5)?,
+    summary: row.get(6)?,
+    source_url: row.get(7)?,
+    is_selected: int_to_bool(row.get::<_, i64>(8)?),
+    created_at: row.get(9)?,
+    updated_at: row.get(10)?,
   })
 }
 
@@ -1196,7 +1675,7 @@ fn load_memory_source(
       .optional(),
     MemorySourceKind::Reference => conn
       .query_row(
-        "SELECT project_id, file_name, COALESCE(extracted_text, summary, ''), created_at FROM project_references WHERE id=?1",
+        "SELECT project_id, file_name, COALESCE(extracted_text, summary, ''), updated_at FROM project_references WHERE id=?1",
         params![source_ref_id],
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
       )
@@ -1819,6 +2298,7 @@ fn main() {
       list_decisions,
       list_references,
       add_references,
+      process_repository_reference,
       update_reference,
       remove_reference,
       retrieve_memory_context,

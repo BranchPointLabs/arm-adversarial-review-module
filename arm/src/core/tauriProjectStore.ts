@@ -39,6 +39,8 @@ export const tauriProjectStore: ProjectStore = {
   listDecisions: (projectPath) => invoke<Decision[]>("list_decisions", { projectPath }),
   listReferences: (projectPath) => invoke<ProjectReference[]>("list_references", { projectPath }),
   addReferences: (projectPath, references) => invoke<ProjectReference[]>("add_references", { projectPath, references }),
+  processRepositoryReference: (projectPath, input) =>
+    invoke<ProjectReference>("process_repository_reference", { projectPath, input: { input } }),
   updateReference: (projectPath, referenceId, patch) =>
     invoke<ProjectReference>("update_reference", { projectPath, referenceId, patch }),
   removeReference: (projectPath, referenceId) => invoke<void>("remove_reference", { projectPath, referenceId }),
