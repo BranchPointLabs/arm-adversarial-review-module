@@ -6,9 +6,11 @@ import {
   generateChatCardsWithLlm,
   generateChatReplyWithLlm,
   generateDocumentUpdateWithLlm,
+  generatePlanWithLlm,
   generateReviewCardsWithLlm,
 } from "../../core/llmReview";
-import { buildPlanMarkdown, buildPlanQuestions, PlanMode, PlanQuestion, PlanStage } from "../../core/planning";
+import { buildFallbackPlanModel, renderPlanMarkdown } from "../../core/planModel";
+import { buildPlanQuestions, PlanMode, PlanQuestion, PlanStage } from "../../core/planning";
 import {
   AgentCard,
   ChatNote,
@@ -59,6 +61,7 @@ export default function ProjectWorkspace() {
   const projectName = projectPath.split(/[\\/]/).filter(Boolean).pop() || "Project";
 
   const [navCollapsed, setNavCollapsed] = React.useState(false);
+  const [rightRailWidth, setRightRailWidth] = React.useState(420);
   const [documents, setDocuments] = React.useState<ProjectDocument[]>([]);
   const [notes, setNotes] = React.useState<ChatNote[]>([]);
   const [decisions, setDecisions] = React.useState<Decision[]>([]);
@@ -111,9 +114,12 @@ export default function ProjectWorkspace() {
   const [planMode, setPlanMode] = React.useState<PlanMode>("focused");
   const [planQuestions, setPlanQuestions] = React.useState<PlanQuestion[]>([]);
   const [planStatus, setPlanStatus] = React.useState<string | null>(null);
+  const [planGenerating, setPlanGenerating] = React.useState(false);
+  const [activePlanPageIndex, setActivePlanPageIndex] = React.useState(0);
 
   const filesInputRef = React.useRef<HTMLInputElement | null>(null);
   const folderInputRef = React.useRef<HTMLInputElement | null>(null);
+  const draggingRightRail = React.useRef(false);
 
   const route = parseRoute(location.pathname);
   const currentView = route.view;
@@ -123,6 +129,7 @@ export default function ProjectWorkspace() {
   const sidebarItems = buildSidebarItems(cards, cardFilter, showAllCards, showDismissedCards);
   const sourceDocuments = documents.filter((document) => document.type !== "PLAN");
   const planDocuments = documents.filter((document) => document.type === "PLAN");
+  const rightRailOpen = rightRailWidth >= 220;
 
   React.useEffect(() => {
     if (!projectPath) return;
@@ -138,12 +145,34 @@ export default function ProjectWorkspace() {
       null;
     setActiveDocument(nextDocument);
     setDocumentMarkdown(nextDocument?.markdown || "");
+    if (nextDocument?.type === "PLAN") {
+      setActivePlanPageIndex(0);
+    }
     if (nextDocument?.type === "diagram") {
       setDiagramMode("diagram");
       setDiagramMermaidDraft(nextDocument.mermaid || "");
       setDiagramCodeEditing(false);
     }
   }, [documents, routeDocumentId, projectPath]);
+
+  React.useEffect(() => {
+    function onPointerMove(event: PointerEvent) {
+      if (!draggingRightRail.current) return;
+      const nextWidth = Math.min(520, Math.max(40, window.innerWidth - event.clientX));
+      setRightRailWidth(nextWidth);
+    }
+
+    function onPointerUp() {
+      draggingRightRail.current = false;
+    }
+
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
+  }, []);
 
   if (!projectPath) {
     return <Navigate to="/" replace />;
@@ -187,6 +216,27 @@ export default function ProjectWorkspace() {
     }
   }
 
+  async function deletePlanNow(document: ProjectDocument) {
+    if (document.type !== "PLAN") return;
+    const confirmed = window.confirm(`Delete plan "${document.name}"?`);
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      await projectStore.deleteDocument(projectPath, document.id);
+      setActiveDocument(null);
+      setDocumentMarkdown("");
+      setActivePlanPageIndex(0);
+      await refreshAll();
+      navigate(`/p/${encodeURIComponent(projectPath)}/context`);
+      setStatus("Plan deleted.");
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Delete failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copyDocumentNow() {
     if (!activeDocument) return;
     try {
@@ -205,6 +255,7 @@ export default function ProjectWorkspace() {
     }
 
     setBusy(true);
+    setPlanGenerating(true);
     try {
       const documentType = newDocumentKind === "diagram" ? "diagram" : newDocumentType;
       const document = await projectStore.createDocument(projectPath, trimmed, documentType);
@@ -421,27 +472,52 @@ export default function ProjectWorkspace() {
     }
 
     setBusy(true);
+    setPlanGenerating(true);
     try {
-      const planName = `${selected[0]?.name || projectName} Plan`;
+      const planTimecode = formatPlanTimecode(new Date());
+      const planName = `${selected[0]?.name || projectName} Plan ${planTimecode}`;
       const plan = await projectStore.createDocument(projectPath, planName, "PLAN");
-      const markdown = buildPlanMarkdown({
-        title: planName,
-        mode: planMode,
-        documents: selected,
-        cards: getPlanningCards(),
-        context: planContext,
-        questions: planQuestions,
-      });
+      const planningCards = getPlanningCards();
+      const fallbackMarkdown = ensurePlanTimecode(
+        renderPlanMarkdown(buildFallbackPlanModel({
+          title: planName,
+          mode: planMode,
+          documents: selected,
+          cards: planningCards,
+          context: planContext,
+          questions: planQuestions,
+        })),
+        planTimecode,
+      );
+      let markdown = fallbackMarkdown;
+      let usedFallback = false;
+      try {
+        markdown = ensurePlanTimecode(
+          await generatePlanWithLlm({
+            title: planName,
+            mode: planMode,
+            documents: selected,
+            cards: planningCards,
+            context: planContext,
+            questions: planQuestions,
+          }),
+          planTimecode,
+        );
+      } catch (error) {
+        usedFallback = true;
+        console.warn("[arm-plan] LLM generation failed; using deterministic fallback.", error);
+      }
       await projectStore.saveDocument(projectPath, plan.id, markdown);
       setPlanOpen(false);
       setPlanStage("setup");
       setPlanQuestions([]);
       await refreshAll();
       navigate(`/p/${encodeURIComponent(projectPath)}/documents/${plan.id}`);
-      setStatus("Plan created.");
+      setStatus(usedFallback ? "Plan created with local fallback because generation failed." : "Plan generated.");
     } catch (error: any) {
       setPlanStatus(typeof error === "string" ? error : error?.message || "Plan creation failed.");
     } finally {
+      setPlanGenerating(false);
       setBusy(false);
     }
   }
@@ -739,7 +815,14 @@ export default function ProjectWorkspace() {
   }
 
   return (
-    <div className={"workspace armWorkspace" + (navCollapsed ? " navCollapsed" : "")}>
+    <div
+      className={
+        "workspace armWorkspace" +
+        (navCollapsed ? " navCollapsed" : "") +
+        (!rightRailOpen ? " rightRailCompact" : "")
+      }
+      style={{ "--right-rail-width": `${rightRailWidth}px` } as React.CSSProperties}
+    >
       <aside className="navPane workspaceSidebar" aria-label="Project navigation">
         <div className="projectLine">
           {!navCollapsed ? <div className="projectNameLine">{projectName}</div> : null}
@@ -848,87 +931,111 @@ export default function ProjectWorkspace() {
       <section className="focusPane workspaceFocus">{renderCenterPane()}</section>
 
       <aside className="inputPane reviewRail unifiedSidebar" aria-label="Unified activity sidebar">
-        <div className="segmentedControl sidebarFeatureBar">
-          {(["info", "open_question", "warning", "action"] as CardFilter[]).map((filter) => (
-            <button
-              key={filter}
-              type="button"
-              className={`segmentedPill cardTypePill cardTypePill-${filter}` + (cardFilter === filter ? " active" : "")}
-              onClick={() => setCardFilter(filter)}
-            >
-              {cardFilterLabel(filter)} ({countCards(cards, filter, showDismissedCards)})
-            </button>
-          ))}
-        </div>
-        <div className="sidebarVisibilityControls">
-          <label className="sidebarCheckbox">
-            <input
-              type="checkbox"
-              checked={showAllCards}
-              onChange={(event) => setShowAllCards(event.target.checked)}
-            />
-            <span>Show all</span>
-          </label>
-          <label className="sidebarCheckbox">
-            <input
-              type="checkbox"
-              checked={showDismissedCards}
-              onChange={(event) => setShowDismissedCards(event.target.checked)}
-            />
-            <span>Show dismissed</span>
-          </label>
-        </div>
-        <div className="inputCardList unifiedStream">
-          {sidebarItems.map((item) => (
-            <SidebarItemView
-              key={item.id}
-              item={item}
-              onAccept={openResolveCard}
-              onDismiss={(card) => void setCardStatus(card, "rejected")}
-            />
-          ))}
-          {sidebarItems.length === 0 ? <div className="muted">No activity here yet.</div> : null}
-        </div>
-        <div className="sidebarComposer">
-          <textarea
-            className="sidebarComposerInput"
-            value={prompt}
-            placeholder={composerPlaceholder(chatMode)}
-            onChange={(event) => setPrompt(event.target.value)}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !submitBusy) void submitPrompt();
-            }}
-          />
-          <div className="segmentedControl sidebarActionBar">
-            {(["chat", "product", "technical", "everything"] as ChatMode[]).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={"segmentedPill" + (chatMode === mode ? " active" : "")}
-                onClick={() => setChatMode(mode)}
-              >
-                {chatModeLabel(mode)}
-              </button>
-            ))}
-          </div>
-          <div className="sidebarComposerFooter">
-            <button
-              type="button"
-              className="primary submitButton"
-              onClick={() => void submitPrompt()}
-              disabled={busy || submitBusy || !prompt.trim()}
-            >
-              {submitBusy ? (
-                <>
-                  <span className="spinner" aria-hidden="true" />
-                  <span>Submitting</span>
-                </>
-              ) : (
-                "Submit"
-              )}
-            </button>
-          </div>
-        </div>
+        <div
+          className="rightRailResizeHandle"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize activity sidebar"
+          onPointerDown={(event) => {
+            draggingRightRail.current = true;
+            event.currentTarget.setPointerCapture(event.pointerId);
+          }}
+        />
+        {!rightRailOpen ? (
+          <button
+            type="button"
+            className="iconButton rightRailOpenButton"
+            title="Open activity sidebar"
+            aria-label="Open activity sidebar"
+            onClick={() => setRightRailWidth(420)}
+          >
+            {"<"}
+          </button>
+        ) : (
+          <>
+            <div className="segmentedControl sidebarFeatureBar">
+              {(["info", "open_question", "warning", "action"] as CardFilter[]).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  className={`segmentedPill cardTypePill cardTypePill-${filter}` + (cardFilter === filter ? " active" : "")}
+                  onClick={() => setCardFilter(filter)}
+                >
+                  {cardFilterLabel(filter)} ({countCards(cards, filter, showDismissedCards)})
+                </button>
+              ))}
+            </div>
+            <div className="sidebarVisibilityControls">
+              <label className="sidebarCheckbox">
+                <input
+                  type="checkbox"
+                  checked={showAllCards}
+                  onChange={(event) => setShowAllCards(event.target.checked)}
+                />
+                <span>Show all</span>
+              </label>
+              <label className="sidebarCheckbox">
+                <input
+                  type="checkbox"
+                  checked={showDismissedCards}
+                  onChange={(event) => setShowDismissedCards(event.target.checked)}
+                />
+                <span>Show dismissed</span>
+              </label>
+            </div>
+            <div className="inputCardList unifiedStream">
+              {sidebarItems.map((item) => (
+                <SidebarItemView
+                  key={item.id}
+                  item={item}
+                  onAccept={openResolveCard}
+                  onDismiss={(card) => void setCardStatus(card, "rejected")}
+                />
+              ))}
+              {sidebarItems.length === 0 ? <div className="muted">No activity here yet.</div> : null}
+            </div>
+            <div className="sidebarComposer">
+              <textarea
+                className="sidebarComposerInput"
+                value={prompt}
+                placeholder={composerPlaceholder(chatMode)}
+                onChange={(event) => setPrompt(event.target.value)}
+                onKeyDown={(event) => {
+                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !submitBusy) void submitPrompt();
+                }}
+              />
+              <div className="segmentedControl sidebarActionBar">
+                {(["chat", "product", "technical", "everything"] as ChatMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    className={"segmentedPill" + (chatMode === mode ? " active" : "")}
+                    onClick={() => setChatMode(mode)}
+                  >
+                    {chatModeLabel(mode)}
+                  </button>
+                ))}
+              </div>
+              <div className="sidebarComposerFooter">
+                <button
+                  type="button"
+                  className="primary submitButton"
+                  onClick={() => void submitPrompt()}
+                  disabled={busy || submitBusy || !prompt.trim()}
+                >
+                  {submitBusy ? (
+                    <>
+                      <span className="spinner" aria-hidden="true" />
+                      <span>Submitting</span>
+                    </>
+                  ) : (
+                    "Submit"
+                  )}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </aside>
 
       <input
@@ -1145,6 +1252,15 @@ export default function ProjectWorkspace() {
           onModeChange={setPlanMode}
           onQuestionsChange={setPlanQuestions}
         />
+      ) : null}
+      {planGenerating ? (
+        <div className="generationOverlay" role="status" aria-live="polite">
+          <div className="generationCard">
+            <span className="spinner generationSpinner" aria-hidden="true" />
+            <div className="surfaceTitle">Generating plan</div>
+            <div className="surfaceCopy">Breaking this into initiatives, epics, tickets, and testing criteria.</div>
+          </div>
+        </div>
       ) : null}
 
       {resolveCard ? (
@@ -1377,13 +1493,25 @@ export default function ProjectWorkspace() {
         );
       }
 
-      return (
-        <FocusFrame
-          title={activeDocument?.name || "Document"}
-          description={activeDocument ? `${activeDocument.type} document` : "Select a document from the left column."}
-          actions={
-            <div className="row">
-              {activeDocument?.type === "PLAN" ? (
+      if (activeDocument?.type === "PLAN") {
+        const planPages = buildPlanPages(documentMarkdown);
+        const activePage = planPages[Math.min(activePlanPageIndex, Math.max(0, planPages.length - 1))];
+        return (
+          <FocusFrame
+            title={activeDocument.name}
+            description="Plan folder"
+            actions={
+              <div className="row">
+                <button
+                  type="button"
+                  className="iconButton dangerIconButton"
+                  title="Delete plan"
+                  aria-label="Delete plan"
+                  disabled={busy}
+                  onClick={() => void deletePlanNow(activeDocument)}
+                >
+                  <TrashIcon />
+                </button>
                 <button
                   type="button"
                   className="iconButton"
@@ -1393,6 +1521,67 @@ export default function ProjectWorkspace() {
                 >
                   <LightningIcon />
                 </button>
+                <button
+                  type="button"
+                  className="iconButton"
+                  title="Copy plan"
+                  aria-label="Copy plan"
+                  onClick={() => void copyDocumentNow()}
+                >
+                  <CopyIcon />
+                </button>
+                <button
+                  type="button"
+                  className="iconButton iconButton-primary"
+                  title="Save plan"
+                  aria-label="Save plan"
+                  disabled={busy}
+                  onClick={() => void saveDocumentNow()}
+                >
+                  <SaveIcon />
+                </button>
+              </div>
+            }
+          >
+            <PlanFolderView
+              pages={planPages}
+              activePageIndex={activePlanPageIndex}
+              onPageChange={setActivePlanPageIndex}
+              activePage={activePage}
+            />
+          </FocusFrame>
+        );
+      }
+
+      return (
+        <FocusFrame
+          title={activeDocument?.name || "Document"}
+          description={activeDocument ? `${activeDocument.type} document` : "Select a document from the left column."}
+          actions={
+            <div className="row">
+              {isPlanningSourceDocument(activeDocument, documentMarkdown) ? (
+                <>
+                  <button
+                    type="button"
+                    className="iconButton"
+                    title="Update document"
+                    aria-label="Update document"
+                    disabled={!activeDocument}
+                    onClick={() => setUpdateOpen(true)}
+                  >
+                    <PencilIcon />
+                  </button>
+                  <button
+                    type="button"
+                    className="iconButton"
+                    title="Plan mode"
+                    aria-label="Plan mode"
+                    disabled={sourceDocuments.length === 0}
+                    onClick={openPlanMode}
+                  >
+                    <LightningIcon />
+                  </button>
+                </>
               ) : null}
               <button
                 type="button"
@@ -1516,6 +1705,106 @@ type RenderedDiagramNode = {
   responsibility: string;
 };
 
+type PlanPage = {
+  id: string;
+  title: string;
+  kind: "document" | "diagram";
+  content: string;
+  context?: string;
+};
+
+function PlanFolderView(props: {
+  pages: PlanPage[];
+  activePageIndex: number;
+  activePage: PlanPage | undefined;
+  onPageChange: (index: number) => void;
+}) {
+  const page = props.activePage || props.pages[0];
+
+  if (!page) {
+    return <div className="emptyContextState">No plan pages found.</div>;
+  }
+
+  return (
+    <div className="planFolder">
+      <div className="planPageRail" aria-label="Plan pages">
+        {props.pages.map((item, index) => (
+          <button
+            key={item.id}
+            type="button"
+            className={"planPageTab" + (index === props.activePageIndex ? " active" : "")}
+            onClick={() => props.onPageChange(index)}
+          >
+            <span className="documentType">{item.kind === "diagram" ? "DIAGRAM" : "PAGE"}</span>
+            <span className="documentName">{item.title}</span>
+          </button>
+        ))}
+      </div>
+      <div className="planPageViewport">
+        <div className="planPageHeader">
+          <div className="surfaceTitle">{page.title}</div>
+          <div className="feedMeta">{page.kind === "diagram" ? "Mermaid diagram page" : "Plan document page"}</div>
+        </div>
+        {page.kind === "diagram" ? (
+          <PlanDiagramCanvas mermaid={page.content} title={page.title} context={page.context || ""} />
+        ) : (
+          <pre className="planPageText">{page.content}</pre>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PlanDiagramCanvas(props: { mermaid: string; title: string; context: string }) {
+  const parsed = parsePlanMermaidDiagram(props.mermaid, props.context, props.title);
+  const root = parsed.nodes.find((node) => parsed.relationships.some((relationship) => relationship.sourceId === node.id));
+  const children = root
+    ? parsed.relationships
+        .filter((relationship) => relationship.sourceId === root.id)
+        .map((relationship) => parsed.nodes.find((node) => node.id === relationship.targetId))
+        .filter((node): node is PlanDiagramNode => Boolean(node))
+    : parsed.nodes.slice(1);
+
+  if (!root) {
+    return (
+      <div className="diagramEmpty">
+        <div className="surfaceTitle">No diagram data</div>
+        <div className="surfaceCopy">This plan diagram has no readable parent and child work items.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="planDiagramCanvas" aria-label="Plan relationship diagram">
+      <PlanWorkCard node={root} emphasis="parent" />
+      <div className="planDiagramFanout" aria-hidden="true" />
+      <div className="planDiagramChildren">
+        {children.map((child) => (
+          <div key={child.id} className="planDiagramChildRow">
+            <div className="planDiagramArrow" aria-hidden="true" />
+            <PlanWorkCard node={child} emphasis="child" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type PlanDiagramNode = {
+  id: string;
+  title: string;
+  target: string;
+};
+
+function PlanWorkCard(props: { node: PlanDiagramNode; emphasis: "parent" | "child" }) {
+  return (
+    <div className={"planWorkCard " + props.emphasis}>
+      <div className="planWorkCardTitle">{props.node.title}</div>
+      <div className="planWorkCardTarget">{props.node.target || "Target: define the outcome of this block of work."}</div>
+    </div>
+  );
+}
+
 function DiagramCanvas(props: { entities: DiagramEntity[]; mermaid: string }) {
   const parsed = parseMermaidDiagram(props.mermaid);
   const nodes = parsed.nodes.length > 0
@@ -1628,6 +1917,269 @@ function parseMermaidDiagram(mermaid: string): {
   return { nodes: [...nodes.values()], relationships };
 }
 
+function parsePlanMermaidDiagram(mermaid: string, context: string, diagramTitle: string): {
+  nodes: PlanDiagramNode[];
+  relationships: Array<{ sourceId: string; targetId: string }>;
+} {
+  const nodes = new Map<string, PlanDiagramNode>();
+  const relationships: Array<{ sourceId: string; targetId: string }> = [];
+  const inferred = inferPlanDiagramLabels(context, diagramTitle);
+
+  for (const line of mermaid.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("flowchart") || trimmed.startsWith("graph")) continue;
+
+    for (const nodeMatch of trimmed.matchAll(/([A-Za-z0-9_:-]+)\s*\[\s*"?([^"\]]+)"?\s*\]/g)) {
+      nodes.set(nodeMatch[1], {
+        id: nodeMatch[1],
+        ...parsePlanNodeLabel(nodeMatch[2], nodeMatch[1]),
+      });
+    }
+
+    const relationshipMatch = /^([A-Za-z0-9_:-]+)(?:\s*\[[^\]]+\])?\s*-->(?:\|[^|]+\|)?\s*([A-Za-z0-9_:-]+)/.exec(trimmed);
+    if (relationshipMatch) {
+      relationships.push({ sourceId: relationshipMatch[1], targetId: relationshipMatch[2] });
+      continue;
+    }
+  }
+
+  const sourceIds = new Set(relationships.map((relationship) => relationship.sourceId));
+  const targetIds = new Set(relationships.map((relationship) => relationship.targetId));
+  const rootId = [...sourceIds].find((id) => !targetIds.has(id)) || relationships[0]?.sourceId || "";
+  const childIds = relationships.filter((relationship) => relationship.sourceId === rootId).map((relationship) => relationship.targetId);
+
+  for (const relationship of relationships) {
+    if (!nodes.has(relationship.sourceId)) {
+      nodes.set(relationship.sourceId, {
+        id: relationship.sourceId,
+        ...labelForPlanNode(relationship.sourceId, inferred, rootId, childIds),
+      });
+    }
+    if (!nodes.has(relationship.targetId)) {
+      nodes.set(relationship.targetId, {
+        id: relationship.targetId,
+        ...labelForPlanNode(relationship.targetId, inferred, rootId, childIds),
+      });
+    }
+  }
+
+  for (const node of nodes.values()) {
+    if (isGenericPlanNode(node)) {
+      const label = labelForPlanNode(node.id, inferred, rootId, childIds);
+      node.title = label.title;
+      node.target = label.target;
+    }
+  }
+
+  if (relationships.length === 0) {
+    return buildFallbackPlanDiagram(context, diagramTitle);
+  }
+
+  return { nodes: [...nodes.values()], relationships };
+}
+
+function buildFallbackPlanDiagram(context: string, diagramTitle: string): {
+  nodes: PlanDiagramNode[];
+  relationships: Array<{ sourceId: string; targetId: string }>;
+} {
+  const inferred = inferPlanDiagramLabels(context, diagramTitle);
+  const cleanedTitle = normalizePlanTitle(inferred.cleanedTitle);
+
+  if (/initiative relationship/i.test(diagramTitle)) {
+    const nodes = inferred.initiatives.slice(0, 4).map((item, index) => ({
+      id: `I${index + 1}`,
+      ...planItemLabel(item),
+    }));
+    return {
+      nodes,
+      relationships: nodes.slice(1).map((node, index) => ({
+        sourceId: index === 0 ? nodes[0].id : nodes[index].id,
+        targetId: node.id,
+      })),
+    };
+  }
+
+  const initiative = inferred.initiatives.find((item) => normalizePlanTitle(item.title) === cleanedTitle)
+    || inferred.initiatives.find((item) => cleanedTitle.includes(normalizePlanTitle(item.title)) || normalizePlanTitle(item.title).includes(cleanedTitle));
+  if (initiative) {
+    const children = inferred.epics.filter((item) => item.number.startsWith(`${initiative.number}.`));
+    const nodes = [
+      { id: "parent", ...planItemLabel(initiative) },
+      ...children.map((item, index) => ({ id: `child${index + 1}`, ...planItemLabel(item) })),
+    ];
+    return {
+      nodes,
+      relationships: nodes.slice(1).map((node) => ({ sourceId: "parent", targetId: node.id })),
+    };
+  }
+
+  const epic = inferred.epics.find((item) => normalizePlanTitle(item.title) === cleanedTitle)
+    || inferred.epics.find((item) => cleanedTitle.includes(normalizePlanTitle(item.title)) || normalizePlanTitle(item.title).includes(cleanedTitle));
+  if (epic) {
+    const children = inferred.tickets.filter((item) => item.number.startsWith(`${epic.number}.`));
+    const nodes = [
+      { id: "parent", ...planItemLabel(epic) },
+      ...children.map((item, index) => ({ id: `child${index + 1}`, ...planItemLabel(item) })),
+    ];
+    return {
+      nodes,
+      relationships: nodes.slice(1).map((node) => ({ sourceId: "parent", targetId: node.id })),
+    };
+  }
+
+  return { nodes: [], relationships: [] };
+}
+
+function inferPlanDiagramLabels(context: string, diagramTitle: string) {
+  const cleanedTitle = diagramTitle.replace(/\s+Diagram$/i, "").trim();
+  const initiatives = extractNumberedPlanItems(context, "Initiative");
+  const epics = extractNumberedPlanItems(context, "Epic");
+  const tickets = extractNumberedPlanItems(context, "Ticket");
+  const matchingInitiative = initiatives.find((item) => samePlanTitle(item.title, cleanedTitle));
+  const matchingEpic = epics.find((item) => samePlanTitle(item.title, cleanedTitle));
+
+  return { cleanedTitle, initiatives, epics, tickets, matchingInitiative, matchingEpic };
+}
+
+function labelForPlanNode(
+  id: string,
+  inferred: ReturnType<typeof inferPlanDiagramLabels>,
+  rootId = "",
+  childIds: string[] = [],
+): { title: string; target: string } {
+  if (id === rootId) {
+    const rootItem = inferred.matchingEpic || inferred.matchingInitiative || inferred.initiatives[0];
+    if (rootItem) return planItemLabel(rootItem);
+  }
+
+  const childIndex = childIds.indexOf(id);
+  if (childIndex >= 0) {
+    if (inferred.matchingEpic) {
+      const scopedTickets = inferred.tickets.filter((item) => item.number.startsWith(`${inferred.matchingEpic?.number}.`));
+      const item = scopedTickets[childIndex] || inferred.tickets[childIndex];
+      if (item) return planItemLabel(item);
+    }
+    if (inferred.matchingInitiative) {
+      const scopedEpics = inferred.epics.filter((item) => item.number.startsWith(`${inferred.matchingInitiative?.number}.`));
+      const item = scopedEpics[childIndex] || inferred.epics[childIndex];
+      if (item) return planItemLabel(item);
+    }
+    const overviewItem = inferred.initiatives[childIndex + (rootId ? 1 : 0)] || inferred.initiatives[childIndex];
+    if (overviewItem) return planItemLabel(overviewItem);
+  }
+
+  const initiativeMatch = /^A?I?(\d+)$/i.exec(id);
+  if (initiativeMatch) {
+    const item = inferred.initiatives[Number(initiativeMatch[1]) - 1] || inferred.matchingInitiative;
+    return item ? planItemLabel(item) : { title: inferred.cleanedTitle || humanizeMermaidId(id), target: "" };
+  }
+
+  const epicMatch = /^E(\d+)$|^I?(\d+)E(\d+)$/i.exec(id);
+  if (epicMatch) {
+    const epicNumber = Number(epicMatch[1] || epicMatch[3]);
+    const matchingInitiative = inferred.matchingInitiative;
+    const scopedEpics = matchingInitiative
+      ? inferred.epics.filter((item) => item.number.startsWith(`${matchingInitiative.number}.`))
+      : inferred.epics;
+    const item = scopedEpics[epicNumber - 1] || inferred.epics[epicNumber - 1];
+    return item ? planItemLabel(item) : { title: humanizeMermaidId(id), target: "" };
+  }
+
+  const ticketMatch = /^T(\d+)$|^I?(\d+)E(\d+)T(\d+)$/i.exec(id);
+  if (ticketMatch) {
+    const ticketNumber = Number(ticketMatch[1] || ticketMatch[4]);
+    const matchingEpic = inferred.matchingEpic;
+    const scopedTickets = matchingEpic
+      ? inferred.tickets.filter((item) => item.number.startsWith(`${matchingEpic.number}.`))
+      : inferred.tickets;
+    const item = scopedTickets[ticketNumber - 1] || inferred.tickets[ticketNumber - 1];
+    return item ? planItemLabel(item) : { title: humanizeMermaidId(id), target: "" };
+  }
+
+  return { title: humanizeMermaidId(id), target: "" };
+}
+
+function isGenericPlanNode(node: PlanDiagramNode) {
+  return /^[A-Z]\d*$/i.test(node.title.trim()) || !node.target.trim();
+}
+
+function extractNumberedPlanItems(context: string, kind: "Initiative" | "Epic" | "Ticket") {
+  const explicitPattern = new RegExp(`^\\s*(?:[-*]\\s*)?(?:#{3,5}\\s*)?(?:\\*\\*)?${kind}\\s+([\\d.]+)\\s*(?::|-|\\.|\\))\\s*(.+?)(?:\\*\\*)?\\s*$`, "gim");
+  const matches = [...context.matchAll(explicitPattern)];
+  if (matches.length === 0) {
+    const section = sectionForPlanKind(context, kind);
+    const numberedPattern = /^#{3,5}\s+([\d.]+)\s*(?::|-|\.|\))\s*(.+)$/gim;
+    return [...section.matchAll(numberedPattern)]
+      .filter((match) => numberMatchesPlanKind(match[1], kind))
+      .map((match) => extractedNumberedPlanItem(section, match));
+  }
+
+  return matches.map((match) => extractedNumberedPlanItem(context, match));
+}
+
+function extractedNumberedPlanItem(context: string, match: RegExpMatchArray) {
+    const start = match.index || 0;
+    const nextHeading = context.slice(start + match[0].length).search(/^#{3,5}\s+|\n\s*(?:[-*]\s*)?(?:\*\*)?(?:Initiative|Epic|Ticket)\s+[\d.]+\s*(?::|-|\.|\))/m);
+    const end = nextHeading === -1 ? context.length : start + match[0].length + nextHeading;
+    const block = context.slice(start, end);
+    const target = /(?:Goal|Target):\s*(.+)/i.exec(block)?.[1]?.trim() || "";
+    return {
+      number: match[1],
+      title: match[2].trim(),
+      target,
+    };
+}
+
+function sectionForPlanKind(markdown: string, kind: "Initiative" | "Epic" | "Ticket") {
+  const sectionTitle = kind === "Initiative" ? "Initiatives" : `${kind}s`;
+  const pattern = new RegExp(`^##\\s+${sectionTitle}\\s*$`, "im");
+  const match = pattern.exec(markdown);
+  if (!match) return markdown;
+  const start = match.index + match[0].length;
+  const next = markdown.slice(start).search(/^##\s+/m);
+  return markdown.slice(start, next === -1 ? markdown.length : start + next);
+}
+
+function numberMatchesPlanKind(number: string, kind: "Initiative" | "Epic" | "Ticket") {
+  const depth = number.split(".").filter(Boolean).length;
+  if (kind === "Initiative") return depth === 1;
+  if (kind === "Epic") return depth === 2;
+  return depth >= 3;
+}
+
+function planItemLabel(item: { title: string; target: string }) {
+  return {
+    title: item.title,
+    target: item.target || "Define the outcome of this block of work.",
+  };
+}
+
+function samePlanTitle(left: string, right: string) {
+  return normalizePlanTitle(left) === normalizePlanTitle(right);
+}
+
+function normalizePlanTitle(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function parsePlanNodeLabel(rawLabel: string, fallback: string) {
+  const label = rawLabel.replace(/<br\s*\/?>/gi, "\n").replace(/\\"/g, '"');
+  const parts = label.split(/\n+/).map((item) => item.trim()).filter(Boolean);
+  const targetLine = parts.find((part) => /^target:/i.test(part));
+  return {
+    title: parts[0] || humanizeMermaidId(fallback),
+    target: targetLine?.replace(/^target:\s*/i, "") || parts.slice(1).join(" ") || "",
+  };
+}
+
+function humanizeMermaidId(value: string) {
+  return value.replace(/^I(\d+)E?(\d+)?T?(\d+)?$/i, (_match, initiative, epic, ticket) => {
+    if (ticket) return `Ticket ${initiative}.${epic}.${ticket}`;
+    if (epic) return `Epic ${initiative}.${epic}`;
+    return `Initiative ${initiative}`;
+  });
+}
+
 function FocusFrame(props: {
   title: string;
   description: string;
@@ -1691,6 +2243,102 @@ function formatTime(value: string) {
 function isReferenceFile(name: string) {
   const lowered = name.toLowerCase();
   return acceptedReferenceTypes.some((suffix) => lowered.endsWith(suffix));
+}
+
+function buildPlanPages(markdown: string): PlanPage[] {
+  const pages: PlanPage[] = [];
+  const majorSections = splitPlanMajorSections(markdown);
+
+  for (const section of majorSections) {
+    const parts = section.content.split(/```mermaid\s*([\s\S]*?)```/gi);
+    const textParts: string[] = [];
+    const diagramPages: PlanPage[] = [];
+
+    for (let index = 0; index < parts.length; index += 1) {
+      if (index % 2 === 0) {
+        const text = parts[index].trim();
+        if (text) textParts.push(text);
+        continue;
+      }
+
+      const mermaid = parts[index].trim();
+      if (mermaid) {
+        diagramPages.push({
+          id: `${section.id}-diagram-${index}`,
+          title: section.title === "Plan Summary"
+            ? "Initiative Relationship Diagram"
+            : `${nearestPlanSubject(parts[index - 1] || section.title)} Diagram`,
+          kind: "diagram",
+          content: mermaid,
+          context: `${section.content}\n\n${markdown}`,
+        });
+      }
+    }
+
+    const text = textParts.join("\n\n").trim();
+    if (text) {
+      pages.push({
+        id: section.id,
+        title: section.title,
+        kind: "document",
+        content: text,
+      });
+    }
+    pages.push(...diagramPages);
+  }
+
+  return pages.length > 0
+    ? pages
+    : [{ id: "plan", title: "Plan", kind: "document", content: markdown.trim() || "No plan content yet." }];
+}
+
+function splitPlanMajorSections(markdown: string) {
+  const matches = [...markdown.matchAll(/^##\s+(.+)$/gm)];
+  if (matches.length === 0) {
+    return [{ id: "plan", title: firstMarkdownHeading(markdown) || "Plan", content: markdown }];
+  }
+
+  return matches.map((match, index) => {
+    const start = match.index || 0;
+    const next = matches[index + 1]?.index ?? markdown.length;
+    const title = match[1].trim();
+    return {
+      id: createStablePageId(title, index),
+      title,
+      content: markdown.slice(start, next).trim(),
+    };
+  });
+}
+
+function firstMarkdownHeading(markdown: string) {
+  return /^#\s+(.+)$/m.exec(markdown)?.[1]?.trim() || null;
+}
+
+function nearestPlanSubject(text: string) {
+  const headings = [...text.matchAll(/^#{3,4}\s+(.+)$/gm)];
+  const heading = headings[headings.length - 1]?.[1]?.trim();
+  return heading ? heading.replace(/^(Initiative|Epic|Ticket)\s+[\d.]+:\s*/i, "") : "Plan";
+}
+
+function createStablePageId(title: string, index: number) {
+  return `${index}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "page"}`;
+}
+
+function formatPlanTimecode(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
+}
+
+function ensurePlanTimecode(markdown: string, timecode: string) {
+  if (/^Timecode:/m.test(markdown)) return markdown;
+  return markdown.replace(/^(#\s+.+)$/m, `$1\n\nTimecode: ${timecode}`);
+}
+
+function isPlanningSourceDocument(document: ProjectDocument | null, markdown: string) {
+  if (!document) return false;
+  if (document.type === "PRD") return true;
+  if (document.type === "diagram" || document.type === "PLAN") return false;
+  return /\brfc\b|request\s+for\s+comments/i.test(`${document.name}\n${markdown.slice(0, 1200)}`);
 }
 
 function createLocalId(name: string) {
@@ -1918,6 +2566,16 @@ function LightningIcon() {
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
       <path d="M8.8 1.8 3.7 8.6h3.5l-.6 5.6 5.6-7.4H8.7z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M3.5 4.5h9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M6.2 4.5V3.2h3.6v1.3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M5 6.2 5.5 13h5L11 6.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
     </svg>
   );
 }

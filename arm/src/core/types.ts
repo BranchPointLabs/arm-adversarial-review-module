@@ -113,6 +113,7 @@ export type ProjectStore = {
   createDocument(projectPath: string, name: string, type: DocumentType): Promise<ProjectDocument>;
   loadDocument(projectPath: string, documentId: string): Promise<ProjectDocument>;
   saveDocument(projectPath: string, documentId: string, markdown: string): Promise<void>;
+  deleteDocument(projectPath: string, documentId: string): Promise<void>;
   saveDiagramDocument(projectPath: string, documentId: string, entities: DiagramEntity[]): Promise<ProjectDocument>;
   saveDiagramMermaid(projectPath: string, documentId: string, mermaid: string): Promise<ProjectDocument>;
   addChatNote(projectPath: string, text: string, tags: string[] | null): Promise<ChatNote>;

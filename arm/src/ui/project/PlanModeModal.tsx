@@ -23,6 +23,14 @@ type PlanModeModalProps = {
 };
 
 export default function PlanModeModal(props: PlanModeModalProps) {
+  const [activeQuestionIndex, setActiveQuestionIndex] = React.useState(0);
+  const questionCount = props.planQuestions.length;
+  const isLastQuestion = activeQuestionIndex >= Math.max(0, questionCount - 1);
+
+  React.useEffect(() => {
+    setActiveQuestionIndex(0);
+  }, [props.planStage, questionCount]);
+
   return (
     <Modal
       title="Plan Mode"
@@ -39,17 +47,42 @@ export default function PlanModeModal(props: PlanModeModalProps) {
           </>
         ) : (
           <>
-            <button type="button" className="secondary" onClick={props.onBack}>
-              Back
+            <button
+              type="button"
+              className="secondary"
+              onClick={() => {
+                if (activeQuestionIndex > 0) {
+                  setActiveQuestionIndex((index) => index - 1);
+                } else {
+                  props.onBack();
+                }
+              }}
+            >
+              {activeQuestionIndex > 0 ? "Previous" : "Back"}
             </button>
-            <button type="button" className="primary" onClick={props.onContinue} disabled={props.busy}>
-              Continue
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                if (!isLastQuestion) {
+                  setActiveQuestionIndex((index) => Math.min(index + 1, questionCount - 1));
+                } else {
+                  props.onContinue();
+                }
+              }}
+              disabled={props.busy || questionCount === 0}
+            >
+              {isLastQuestion ? "Continue" : "Next"}
             </button>
           </>
         )
       }
     >
-      {props.planStage === "setup" ? <PlanSetup {...props} /> : <PlanInterrogation {...props} />}
+      {props.planStage === "setup" ? (
+        <PlanSetup {...props} />
+      ) : (
+        <PlanInterrogation {...props} activeQuestionIndex={activeQuestionIndex} />
+      )}
     </Modal>
   );
 }
@@ -108,13 +141,25 @@ function PlanSetup(props: PlanModeModalProps) {
   );
 }
 
-function PlanInterrogation(props: PlanModeModalProps) {
+function PlanInterrogation(props: PlanModeModalProps & { activeQuestionIndex: number }) {
+  const question = props.planQuestions[props.activeQuestionIndex];
+  const questionCount = props.planQuestions.length;
+  const progressPercent = questionCount > 0 ? ((props.activeQuestionIndex + 1) / questionCount) * 100 : 0;
+
   return (
     <div className="stack">
+      <div className="planProgress">
+        <div className="planProgressMeta">
+          <span>Question {questionCount > 0 ? props.activeQuestionIndex + 1 : 0} of {questionCount}</span>
+        </div>
+        <div className="planProgressTrack" aria-hidden="true">
+          <div className="planProgressFill" style={{ width: `${progressPercent}%` }} />
+        </div>
+      </div>
       <div className="surfaceTitle">We need clarification before planning</div>
-      {props.planQuestions.map((question, index) => (
+      {question ? (
         <div key={question.id} className="planQuestion">
-          <div className="reviewCardTitle">{index + 1}. {question.question}</div>
+          <div className="reviewCardTitle">{props.activeQuestionIndex + 1}. {question.question}</div>
           <div className="surfaceCopy">Why it matters: {question.why}</div>
           <div className="surfaceCopy">Impact: {question.impact}</div>
           <div className="feedMeta">Source: {question.source}</div>
@@ -146,7 +191,9 @@ function PlanInterrogation(props: PlanModeModalProps) {
             <span>Skip (assume default)</span>
           </label>
         </div>
-      ))}
+      ) : (
+        <div className="muted">No clarification questions generated.</div>
+      )}
       {props.planStatus ? <div className="status">{props.planStatus}</div> : null}
     </div>
   );

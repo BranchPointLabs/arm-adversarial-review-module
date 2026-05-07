@@ -10,6 +10,8 @@ import {
   ProjectReference,
   RetrievedMemoryChunk,
 } from "./projectStore";
+import { PlanMode, PlanQuestion } from "./planning";
+import { normalizePlanModel, planModelSchema, renderPlanMarkdown } from "./planModel";
 
 type ProviderReviewMode = "product" | "technical";
 export type ChatPersonaMode = "chat" | "product" | "technical";
@@ -198,6 +200,32 @@ export async function generateDocumentUpdateWithLlm(input: {
     buildDocumentUpdateInstruction(instructions),
     payload,
   );
+}
+
+export async function generatePlanWithLlm(input: {
+  title: string;
+  mode: PlanMode;
+  documents: ProjectDocument[];
+  cards: NewAgentCardInput[];
+  context: string;
+  questions: PlanQuestion[];
+}) {
+  const settings = loadLlmSettings();
+  const apiKey = await getApiKey(settings.provider);
+  if (!apiKey) {
+    throw new Error(`No ${providerLabel(settings.provider)} API key saved.`);
+  }
+
+  const instructions = buildPlanInstruction();
+  const payload = buildPlanPayload(input);
+
+  if (settings.provider === "openai") {
+    const model = await callOpenAiJson(settings.modelByProvider.openai, apiKey, instructions, payload, planModelSchema, 5000);
+    return renderPlanMarkdown(normalizePlanModel(input, model));
+  }
+
+  const model = await callAnthropicJson(settings.modelByProvider.anthropic, apiKey, instructions, payload, 5000);
+  return renderPlanMarkdown(normalizePlanModel(input, model));
 }
 
 function buildInstruction(mode: ProviderReviewMode) {
@@ -410,6 +438,91 @@ function buildDocumentUpdatePayload(input: {
   );
 }
 
+function buildPlanInstruction() {
+  return [
+    "You are ARM Plan Mode.",
+    "Generate a high-level, implementation-independent delivery plan as JSON.",
+    "Do not use a generic template. Synthesize the plan from the source documents, accepted cards, user context, and clarification answers.",
+    "The goal is an evaluable planning framework, not technical implementation detail.",
+    "Do not write Markdown.",
+    "Do not write Mermaid.",
+    "ARM will render Markdown pages and Mermaid diagrams from your structured JSON.",
+    "Every initiative, epic, and ticket must follow a single responsibility principle.",
+    "Each initiative must have: Goal, Single responsibility, Success requirements, and Evaluation criteria.",
+    "Each epic must be a coherent outcome area, not a technical layer.",
+    "Each ticket must have one clear implementation-independent goal. Do not prescribe code structure, databases, routes, screens, libraries, or architecture unless the source explicitly requires it.",
+    "Each ticket must include Requirements for success and Validation criteria.",
+    "Use stable ids: initiatives I1, I2, I3; epics I1E1, I1E2; tickets I1E1T1, I1E1T2.",
+    "Use initiative dependsOn ids to describe high-level initiative relationships. Use [] for parallel initiatives and previous initiative ids for dependencies.",
+    "Keep language clear enough for a non-technical stakeholder to evaluate and specific enough for an engineer to implement however they choose.",
+    "Prefer 3 initiatives, with 2 epics per initiative, and 2 to 4 tickets per epic.",
+    "Include a final Proceed / Iterate / Kill decision gate tied to the user's measurable signal.",
+    "Return JSON only.",
+  ].join("\n");
+}
+
+function buildPlanPayload(input: {
+  title: string;
+  mode: PlanMode;
+  documents: ProjectDocument[];
+  cards: NewAgentCardInput[];
+  context: string;
+  questions: PlanQuestion[];
+}) {
+  const answers = input.questions.map((question) => ({
+    question: question.question,
+    answer: question.skipped ? "(Skipped; make the safest explicit assumption.)" : question.answer,
+    why: question.why,
+    impact: question.impact,
+    source: question.source,
+  }));
+
+  return JSON.stringify(
+    {
+      requestedTitle: input.title,
+      mode: input.mode,
+      userContext: input.context,
+      clarificationAnswers: answers,
+      sourceDocuments: input.documents.map((document) => ({
+        title: document.name,
+        type: document.type,
+        markdown: truncateForPayload(document.markdown, 10000),
+      })),
+      acceptedCards: input.cards.map((card) => ({
+        type: card.type,
+        title: card.title,
+        body: card.body,
+        proposedUpdate: card.proposedUpdate,
+        targetSection: card.targetSection,
+        sourceAgent: card.sourceAgent,
+      })),
+      outputContract: {
+        headings: [
+          "Plan Summary",
+          "Initiatives",
+          "Epics",
+          "Tickets",
+        ],
+        constraints: [
+          "Implementation-independent goals.",
+          "Single responsibility at initiative, epic, and ticket levels.",
+          "Clear success requirements.",
+          "Clear validation criteria.",
+          "No unnecessary technical detail.",
+          "Mermaid diagrams: one initiative-to-epics diagram per initiative.",
+          "Mermaid diagrams: one epic-to-tickets diagram per epic.",
+          "Mermaid diagrams: one plan-summary initiative relationship diagram directly after Plan Summary.",
+          "Every Mermaid endpoint must be declared as a labeled node in the same diagram.",
+          "Every Mermaid label must contain real work item text and a Target line.",
+          "No placeholder-only labels in diagrams.",
+        ],
+      },
+    },
+    null,
+    2,
+  );
+}
+
 async function callOpenAi(
   model: string,
   apiKey: string,
@@ -449,7 +562,7 @@ async function callOpenAi(
   return normalizeCards(JSON.parse(text).cards || [], sourceAgent);
 }
 
-async function callOpenAiText(model: string, apiKey: string, instructions: string, payload: string) {
+async function callOpenAiText(model: string, apiKey: string, instructions: string, payload: string, maxOutputTokens = 1400) {
   const response = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
@@ -460,7 +573,7 @@ async function callOpenAiText(model: string, apiKey: string, instructions: strin
       model,
       instructions,
       input: payload,
-      max_output_tokens: 1400,
+      max_output_tokens: maxOutputTokens,
     }),
   });
 
@@ -470,6 +583,44 @@ async function callOpenAiText(model: string, apiKey: string, instructions: strin
   }
 
   return extractOpenAiText(result).trim();
+}
+
+async function callOpenAiJson(
+  model: string,
+  apiKey: string,
+  instructions: string,
+  payload: string,
+  schema: unknown,
+  maxOutputTokens = 1400,
+) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model,
+      instructions,
+      input: payload,
+      max_output_tokens: maxOutputTokens,
+      text: {
+        format: {
+          type: "json_schema",
+          name: "arm_plan_model",
+          schema,
+          strict: true,
+        },
+      },
+    }),
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result?.error?.message || "OpenAI request failed.");
+  }
+
+  return JSON.parse(extractOpenAiText(result));
 }
 
 async function callAnthropic(
@@ -510,7 +661,7 @@ async function callAnthropic(
   return normalizeCards(JSON.parse(text).cards || [], sourceAgent);
 }
 
-async function callAnthropicText(model: string, apiKey: string, instructions: string, payload: string) {
+async function callAnthropicText(model: string, apiKey: string, instructions: string, payload: string, maxTokens = 1400) {
   const response = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -520,7 +671,7 @@ async function callAnthropicText(model: string, apiKey: string, instructions: st
     },
     body: JSON.stringify({
       model,
-      max_tokens: 1400,
+      max_tokens: maxTokens,
       system: instructions,
       messages: [{ role: "user", content: payload }],
     }),
@@ -532,6 +683,30 @@ async function callAnthropicText(model: string, apiKey: string, instructions: st
   }
 
   return extractAnthropicText(result).trim();
+}
+
+async function callAnthropicJson(model: string, apiKey: string, instructions: string, payload: string, maxTokens = 1400) {
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+      "anthropic-version": "2023-06-01",
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: maxTokens,
+      system: instructions,
+      messages: [{ role: "user", content: payload }],
+    }),
+  });
+
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result?.error?.message || "Anthropic request failed.");
+  }
+
+  return parseJsonObject(extractAnthropicText(result));
 }
 
 function extractOpenAiText(result: any): string {
@@ -566,6 +741,17 @@ function extractAnthropicText(result: any): string {
   }
 
   return parts.join("\n");
+}
+
+function parseJsonObject(text: string) {
+  const trimmed = text.trim();
+  if (trimmed.startsWith("{")) return JSON.parse(trimmed);
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(trimmed)?.[1];
+  if (fenced) return JSON.parse(fenced);
+  const start = trimmed.indexOf("{");
+  const end = trimmed.lastIndexOf("}");
+  if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
+  throw new Error("LLM response did not contain a JSON object.");
 }
 
 function normalizeCards(cards: any[], sourceAgent: string): NewAgentCardInput[] {
@@ -646,6 +832,199 @@ function normalizeString(value: unknown) {
 function normalizeOptionalString(value: unknown) {
   const text = typeof value === "string" ? value.trim() : "";
   return text || null;
+}
+
+function truncateForPayload(value: string, maxChars: number) {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n\n[Truncated for planning context]`;
+}
+
+function repairPlanMermaidLabels(markdown: string) {
+  const sections = splitMarkdownSections(markdown);
+  const initiatives = extractPlanItems(markdown, "Initiative");
+  const epics = extractPlanItems(markdown, "Epic");
+  const tickets = extractPlanItems(markdown, "Ticket");
+
+  return markdown.replace(/```mermaid\s*([\s\S]*?)```/gi, (full, mermaid: string, offset: number) => {
+    const section = sections.find((item) => offset >= item.start && offset < item.end);
+    const beforeBlock = markdown.slice(Math.max(0, offset - 1600), offset);
+    const subject = nearestPlanHeading(beforeBlock);
+    const repaired = repairOneMermaidBlock(mermaid, {
+      sectionTitle: section?.title || "",
+      subject,
+      initiatives,
+      epics,
+      tickets,
+    });
+    return `\`\`\`mermaid\n${repaired.trim()}\n\`\`\``;
+  });
+}
+
+type ExtractedPlanItem = {
+  kind: "Initiative" | "Epic" | "Ticket";
+  number: string;
+  title: string;
+  target: string;
+};
+
+function repairOneMermaidBlock(
+  mermaid: string,
+  context: {
+    sectionTitle: string;
+    subject: { kind: "Initiative" | "Epic" | "Ticket"; number: string; title: string } | null;
+    initiatives: ExtractedPlanItem[];
+    epics: ExtractedPlanItem[];
+    tickets: ExtractedPlanItem[];
+  },
+) {
+  const lines = mermaid.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const direction = lines.find((line) => /^(flowchart|graph)\b/i.test(line)) || "flowchart TD";
+  const relationships = lines
+    .map((line) => /^([A-Za-z0-9_:-]+)(?:\s*\[[^\]]+\])?\s*-->(?:\|([^|]+)\|)?\s*([A-Za-z0-9_:-]+)/.exec(line))
+    .filter((match): match is RegExpExecArray => Boolean(match))
+    .map((match) => ({ sourceId: match[1], label: match[2] || "", targetId: match[3] }));
+  const endpointIds = uniqueStrings(relationships.flatMap((item) => [item.sourceId, item.targetId]));
+  const existingLabels = new Map<string, string>();
+
+  for (const line of lines) {
+    for (const node of line.matchAll(/([A-Za-z0-9_:-]+)\s*\[\s*"([^"]+)"\s*\]/g)) {
+      existingLabels.set(node[1], node[2]);
+    }
+  }
+
+  const labelItems = choosePlanItemsForMermaid(endpointIds, context);
+  const nodeLines = endpointIds.map((id, index) => {
+    const existing = existingLabels.get(id);
+    const item = labelLooksComplete(existing) ? null : labelItems[index];
+    const label = item ? `${item.title}<br/>Target: ${item.target}` : existing || `${id}<br/>Target: Define this work item.`;
+    return `  ${id}["${escapeMermaid(label)}"]`;
+  });
+  const relationshipLines = relationships.map((item) =>
+    `  ${item.sourceId} -->${item.label ? `|${item.label}|` : ""} ${item.targetId}`,
+  );
+
+  return [direction, ...nodeLines, ...relationshipLines].join("\n");
+}
+
+function choosePlanItemsForMermaid(
+  endpointIds: string[],
+  context: {
+    sectionTitle: string;
+    subject: { kind: "Initiative" | "Epic" | "Ticket"; number: string; title: string } | null;
+    initiatives: ExtractedPlanItem[];
+    epics: ExtractedPlanItem[];
+    tickets: ExtractedPlanItem[];
+  },
+) {
+  if (/plan summary/i.test(context.sectionTitle)) {
+    return endpointIds.map((_id, index) => context.initiatives[index]).filter(Boolean);
+  }
+
+  if (/initiatives/i.test(context.sectionTitle)) {
+    const initiative = context.subject?.kind === "Initiative"
+      ? context.initiatives.find((item) => item.number === context.subject?.number)
+      : context.initiatives[0];
+    const childEpics = initiative
+      ? context.epics.filter((item) => item.number.startsWith(`${initiative.number}.`))
+      : context.epics;
+    return [initiative, ...childEpics].filter(Boolean);
+  }
+
+  if (/epics/i.test(context.sectionTitle)) {
+    const epic = context.subject?.kind === "Epic"
+      ? context.epics.find((item) => item.number === context.subject?.number)
+      : context.epics[0];
+    const childTickets = epic
+      ? context.tickets.filter((item) => item.number.startsWith(`${epic.number}.`))
+      : context.tickets;
+    return [epic, ...childTickets].filter(Boolean);
+  }
+
+  return endpointIds.map((_id, index) => [...context.initiatives, ...context.epics, ...context.tickets][index]).filter(Boolean);
+}
+
+function splitMarkdownSections(markdown: string) {
+  const headings = [...markdown.matchAll(/^##\s+(.+)$/gm)];
+  return headings.map((heading, index) => ({
+    title: heading[1].trim(),
+    start: heading.index || 0,
+    end: headings[index + 1]?.index ?? markdown.length,
+  }));
+}
+
+function nearestPlanHeading(text: string) {
+  const headings = [...text.matchAll(/^#{3,5}\s+(?:\*\*)?(Initiative|Epic|Ticket)\s+([\d.]+)\s*(?::|-|\.|\))\s*(.+?)(?:\*\*)?\s*$/gim)];
+  const heading = headings[headings.length - 1];
+  return heading
+    ? {
+        kind: heading[1] as "Initiative" | "Epic" | "Ticket",
+        number: heading[2],
+        title: heading[3].trim(),
+      }
+    : null;
+}
+
+function extractPlanItems(markdown: string, kind: "Initiative" | "Epic" | "Ticket"): ExtractedPlanItem[] {
+  const explicitPattern = new RegExp(`^\\s*(?:[-*]\\s*)?(?:#{3,5}\\s*)?(?:\\*\\*)?${kind}\\s+([\\d.]+)\\s*(?::|-|\\.|\\))\\s*(.+?)(?:\\*\\*)?\\s*$`, "gim");
+  const matches = [...markdown.matchAll(explicitPattern)];
+  if (matches.length === 0) {
+    const section = sectionForPlanKind(markdown, kind);
+    const numberedPattern = /^#{3,5}\s+([\d.]+)\s*(?::|-|\.|\))\s*(.+)$/gim;
+    return [...section.matchAll(numberedPattern)]
+      .filter((match) => numberMatchesPlanKind(match[1], kind))
+      .map((match) => extractedPlanItemFromMatch(section, match, kind));
+  }
+
+  return matches.map((match) => extractedPlanItemFromMatch(markdown, match, kind));
+}
+
+function extractedPlanItemFromMatch(
+  markdown: string,
+  match: RegExpMatchArray,
+  kind: "Initiative" | "Epic" | "Ticket",
+): ExtractedPlanItem {
+    const start = match.index || 0;
+    const nextHeading = markdown.slice(start + match[0].length).search(/^#{3,5}\s+|\n\s*(?:[-*]\s*)?(?:\*\*)?(?:Initiative|Epic|Ticket)\s+[\d.]+\s*(?::|-|\.|\))/m);
+    const end = nextHeading === -1 ? markdown.length : start + match[0].length + nextHeading;
+    const block = markdown.slice(start, end);
+    return {
+      kind,
+      number: match[1],
+      title: match[2].trim(),
+      target: /(?:Goal|Target):\s*(.+)/i.exec(block)?.[1]?.trim() || "Define the outcome of this block of work.",
+    };
+}
+
+function sectionForPlanKind(markdown: string, kind: "Initiative" | "Epic" | "Ticket") {
+  const sectionTitle = kind === "Initiative" ? "Initiatives" : `${kind}s`;
+  const pattern = new RegExp(`^##\\s+${sectionTitle}\\s*$`, "im");
+  const match = pattern.exec(markdown);
+  if (!match) return markdown;
+  const start = match.index + match[0].length;
+  const next = markdown.slice(start).search(/^##\s+/m);
+  return markdown.slice(start, next === -1 ? markdown.length : start + next);
+}
+
+function numberMatchesPlanKind(number: string, kind: "Initiative" | "Epic" | "Ticket") {
+  const depth = number.split(".").filter(Boolean).length;
+  if (kind === "Initiative") return depth === 1;
+  if (kind === "Epic") return depth === 2;
+  return depth >= 3;
+}
+
+function labelLooksComplete(label: string | undefined) {
+  if (!label) return false;
+  const normalized = label.replace(/<br\s*\/?>/gi, "\n").trim();
+  const [title, target] = normalized.split(/\n+/).map((line) => line.trim());
+  return Boolean(title && !/^[A-Z]\d*$/i.test(title) && /^Target:\s+\S+/i.test(target || ""));
+}
+
+function uniqueStrings(values: string[]) {
+  return values.filter((value, index) => value && values.indexOf(value) === index);
+}
+
+function escapeMermaid(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function providerLabel(provider: "openai" | "anthropic") {

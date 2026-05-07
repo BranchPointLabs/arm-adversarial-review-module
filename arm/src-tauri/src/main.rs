@@ -433,6 +433,19 @@ fn save_document(project_path: String, document_id: String, markdown: String) ->
 }
 
 #[command]
+fn delete_document(project_path: String, document_id: String) -> Result<(), String> {
+  let project_path = PathBuf::from(project_path);
+  let conn = open_project_conn(&project_path)?;
+  conn
+    .execute("DELETE FROM documents WHERE id=?1", params![document_id.clone()])
+    .map_err(to_err)?;
+  remove_memory_document(&conn, MemorySourceKind::Document, &document_id).map_err(to_err)?;
+  let now = Utc::now().to_rfc3339();
+  touch_project(&conn, &now).map_err(to_err)?;
+  Ok(())
+}
+
+#[command]
 fn add_chat_note(project_path: String, text: String, tags: Option<Vec<String>>) -> Result<ChatNote, String> {
   let trimmed = text.trim();
   if trimmed.is_empty() {
@@ -1797,6 +1810,7 @@ fn main() {
       create_document,
       load_document,
       save_document,
+      delete_document,
       save_diagram_document,
       save_diagram_mermaid,
       add_chat_note,

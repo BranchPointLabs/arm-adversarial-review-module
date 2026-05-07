@@ -28,6 +28,7 @@ export const tauriProjectStore: ProjectStore = {
   loadDocument: (projectPath, documentId) => invoke<ProjectDocument>("load_document", { projectPath, documentId }),
   saveDocument: (projectPath, documentId, markdown) =>
     invoke<void>("save_document", { projectPath, documentId, markdown }),
+  deleteDocument: (projectPath, documentId) => invoke<void>("delete_document", { projectPath, documentId }),
   saveDiagramDocument: (projectPath, documentId, entities: DiagramEntity[]) =>
     invoke<ProjectDocument>("save_diagram_document", { projectPath, documentId, entities }),
   saveDiagramMermaid: (projectPath, documentId, mermaid) =>
