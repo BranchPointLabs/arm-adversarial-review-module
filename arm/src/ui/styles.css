@@ -524,12 +524,32 @@ button:disabled {
   padding: 14px;
 }
 
+.planPageSubheader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 40px;
+  margin-top: 4px;
+}
+
 .planPageText {
   min-height: 0;
   margin: 0;
   overflow: auto;
   padding: 18px;
   white-space: pre-wrap;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  line-height: 1.5;
+}
+
+.planPageEditor {
+  border: 0;
+  border-radius: 0;
+  min-height: 0;
+  height: 100%;
+  resize: none;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 17px;
   line-height: 1.5;

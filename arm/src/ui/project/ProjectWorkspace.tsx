@@ -216,6 +216,22 @@ export default function ProjectWorkspace() {
     }
   }
 
+  async function savePlanPageNow(page: PlanPage, content: string) {
+    if (!activeDocument || activeDocument.type !== "PLAN" || page.kind !== "document") return;
+    const nextMarkdown = replacePlanPageMarkdown(documentMarkdown, page, content);
+    setBusy(true);
+    try {
+      await projectStore.saveDocument(projectPath, activeDocument.id, nextMarkdown);
+      setDocumentMarkdown(nextMarkdown);
+      setStatus(`${page.title} saved.`);
+      await refreshAll();
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Plan page save failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deletePlanNow(document: ProjectDocument) {
     if (document.type !== "PLAN") return;
     const confirmed = window.confirm(`Delete plan "${document.name}"?`);
@@ -1548,6 +1564,8 @@ export default function ProjectWorkspace() {
               activePageIndex={activePlanPageIndex}
               onPageChange={setActivePlanPageIndex}
               activePage={activePage}
+              busy={busy}
+              onSavePage={(page, content) => savePlanPageNow(page, content)}
             />
           </FocusFrame>
         );
@@ -1718,11 +1736,27 @@ function PlanFolderView(props: {
   activePageIndex: number;
   activePage: PlanPage | undefined;
   onPageChange: (index: number) => void;
+  busy: boolean;
+  onSavePage: (page: PlanPage, content: string) => Promise<void>;
 }) {
   const page = props.activePage || props.pages[0];
+  const [editingPageId, setEditingPageId] = React.useState<string | null>(null);
+  const [pageDraft, setPageDraft] = React.useState("");
+  const editing = page?.kind === "document" && editingPageId === page.id;
+
+  React.useEffect(() => {
+    setEditingPageId(null);
+    setPageDraft(page?.content || "");
+  }, [page?.id]);
 
   if (!page) {
     return <div className="emptyContextState">No plan pages found.</div>;
+  }
+
+  async function saveCurrentPage() {
+    if (!page || page.kind !== "document") return;
+    await props.onSavePage(page, pageDraft);
+    setEditingPageId(null);
   }
 
   return (
@@ -1743,10 +1777,46 @@ function PlanFolderView(props: {
       <div className="planPageViewport">
         <div className="planPageHeader">
           <div className="surfaceTitle">{page.title}</div>
-          <div className="feedMeta">{page.kind === "diagram" ? "Mermaid diagram page" : "Plan document page"}</div>
+          <div className="planPageSubheader">
+            <div className="feedMeta">{page.kind === "diagram" ? "Mermaid diagram page" : "Plan document page"}</div>
+            {page.kind === "document" ? (
+              <div className="row">
+                <button
+                  type="button"
+                  className="iconButton"
+                  title="Edit page"
+                  aria-label="Edit page"
+                  disabled={props.busy}
+                  onClick={() => {
+                    setEditingPageId(page.id);
+                    setPageDraft(page.content);
+                  }}
+                >
+                  <PencilIcon />
+                </button>
+                <button
+                  type="button"
+                  className="iconButton iconButton-primary"
+                  title="Save page"
+                  aria-label="Save page"
+                  disabled={props.busy || !editing}
+                  onClick={() => void saveCurrentPage()}
+                >
+                  <SaveIcon />
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
         {page.kind === "diagram" ? (
           <PlanDiagramCanvas mermaid={page.content} title={page.title} context={page.context || ""} />
+        ) : editing ? (
+          <textarea
+            className="documentEditor planPageEditor"
+            value={pageDraft}
+            onChange={(event) => setPageDraft(event.target.value)}
+            spellCheck={false}
+          />
         ) : (
           <pre className="planPageText">{page.content}</pre>
         )}
@@ -2292,10 +2362,30 @@ function buildPlanPages(markdown: string): PlanPage[] {
     : [{ id: "plan", title: "Plan", kind: "document", content: markdown.trim() || "No plan content yet." }];
 }
 
+function replacePlanPageMarkdown(markdown: string, page: PlanPage, nextContent: string) {
+  if (page.kind !== "document") return markdown;
+  const sections = splitPlanMajorSections(markdown);
+  const section = sections.find((item) => item.title === page.title);
+  if (!section) return markdown;
+
+  const diagrams = [...section.content.matchAll(/```mermaid\s*[\s\S]*?```/gi)].map((match) => match[0].trim());
+  const cleanedContent = sanitizePlanPageDraft(nextContent, page.title);
+  const nextSection = [cleanedContent, ...diagrams].filter(Boolean).join("\n\n").trim();
+  return `${markdown.slice(0, section.start)}${nextSection}${markdown.slice(section.end)}`;
+}
+
+function sanitizePlanPageDraft(value: string, title: string) {
+  const withoutDiagrams = value.replace(/```mermaid\s*[\s\S]*?```/gi, "").trim();
+  if (new RegExp(`^##\\s+${escapeRegExp(title)}\\s*$`, "im").test(withoutDiagrams)) {
+    return withoutDiagrams;
+  }
+  return `## ${title}\n${withoutDiagrams}`.trim();
+}
+
 function splitPlanMajorSections(markdown: string) {
   const matches = [...markdown.matchAll(/^##\s+(.+)$/gm)];
   if (matches.length === 0) {
-    return [{ id: "plan", title: firstMarkdownHeading(markdown) || "Plan", content: markdown }];
+    return [{ id: "plan", title: firstMarkdownHeading(markdown) || "Plan", start: 0, end: markdown.length, content: markdown }];
   }
 
   return matches.map((match, index) => {
@@ -2305,6 +2395,8 @@ function splitPlanMajorSections(markdown: string) {
     return {
       id: createStablePageId(title, index),
       title,
+      start,
+      end: next,
       content: markdown.slice(start, next).trim(),
     };
   });
