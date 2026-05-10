@@ -9,10 +9,9 @@ import {
   saveApiKey,
   saveLlmSettings,
 } from "../core/llmSettings";
-import { isTauriRuntimeAvailable, projectStore, Project } from "../core/projectStore";
+import { isTauriRuntimeAvailable, projectStore } from "../core/projectStore";
 import ProjectWorkspace from "./project/ProjectWorkspace";
 import ProjectHome from "./screens/ProjectHome";
-import Menu from "./shared/Menu";
 import Modal from "./shared/Modal";
 
 export default function App() {
@@ -24,12 +23,6 @@ export default function App() {
   const [createStatus, setCreateStatus] = React.useState<string | null>(null);
   const [createBusy, setCreateBusy] = React.useState(false);
 
-  const [selectOpen, setSelectOpen] = React.useState(false);
-  const [selectBusy, setSelectBusy] = React.useState(false);
-  const [selectStatus, setSelectStatus] = React.useState<string | null>(null);
-  const [selectQuery, setSelectQuery] = React.useState("");
-  const [selectProjects, setSelectProjects] = React.useState<Project[]>([]);
-
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [llmProvider, setLlmProvider] = React.useState<LlmProvider>(() => loadLlmSettings().provider);
   const [modelByProvider, setModelByProvider] = React.useState(() => loadLlmSettings().modelByProvider);
@@ -38,19 +31,6 @@ export default function App() {
   const [settingsBusy, setSettingsBusy] = React.useState(false);
   const [hasOpenAiKey, setHasOpenAiKey] = React.useState(() => hasSavedApiKey("openai"));
   const [hasAnthropicKey, setHasAnthropicKey] = React.useState(() => hasSavedApiKey("anthropic"));
-
-  async function openSelectProject() {
-    setSelectOpen(true);
-    setSelectBusy(true);
-    setSelectStatus(null);
-    try {
-      setSelectProjects(await projectStore.listProjects());
-    } catch (e: any) {
-      setSelectStatus(typeof e === "string" ? e : e?.message || "Failed to load projects.");
-    } finally {
-      setSelectBusy(false);
-    }
-  }
 
   async function onCreateProject() {
     const trimmed = createName.trim();
@@ -72,12 +52,6 @@ export default function App() {
       setCreateBusy(false);
     }
   }
-
-  const filteredProjects = selectProjects.filter((project) => {
-    const q = selectQuery.trim().toLowerCase();
-    if (!q) return true;
-    return project.name.toLowerCase().includes(q) || project.path.toLowerCase().includes(q);
-  });
 
   function openLlmSettings() {
     const current = loadLlmSettings();
@@ -181,75 +155,27 @@ export default function App() {
       <header className="topbar">
         <div className="topbarInner">
           <button type="button" className="brandButton" onClick={() => navigate("/")}>
-            <div className="brand">
             <div className="brandMark">ARM</div>
-            <div>
-              <div className="brandTitle">ARM</div>
-              <div className="brandSub">Adversarial Review Module</div>
-            </div>
-            </div>
           </button>
 
+          <div className="headerIdentity" aria-label="ARM Adversarial Review Module">
+            <div className="brandTitle">ARM</div>
+            <div className="brandSub">Adversarial Review Module</div>
+          </div>
+
           <nav className="appBar" aria-label="App menu">
-            <Menu
-              label="File"
-              items={[
-                { label: "LLM Settings", onSelect: openLlmSettings },
-              ]}
-            />
-            <Menu
-              label="Projects"
-              items={[
-                { label: "New Project...", onSelect: () => setCreateOpen(true) },
-                { label: "Select Project...", onSelect: openSelectProject },
-              ]}
-            />
+            <button
+              type="button"
+              className="iconButton appBarSettingsButton"
+              aria-label="LLM Settings"
+              title="LLM Settings"
+              onClick={openLlmSettings}
+            >
+              <SettingsIcon />
+            </button>
           </nav>
         </div>
       </header>
-
-      {selectOpen ? (
-        <Modal
-          title="Select Project"
-          onClose={() => !selectBusy && setSelectOpen(false)}
-          footer={
-            <button type="button" className="secondary" disabled={selectBusy} onClick={() => setSelectOpen(false)}>
-              Close
-            </button>
-          }
-        >
-          <div className="stack">
-            <input
-              className="textInput"
-              value={selectQuery}
-              placeholder="Search projects"
-              onChange={(e) => setSelectQuery(e.target.value)}
-            />
-            {selectStatus ? <div className="status">{selectStatus}</div> : null}
-            {!selectStatus && selectBusy ? <div className="muted">Loading...</div> : null}
-            {!selectBusy ? (
-              <div className="list compact">
-                {filteredProjects.map((project) => (
-                  <button
-                    key={project.id}
-                    type="button"
-                    className="listItem"
-                    onClick={() => {
-                      setSelectOpen(false);
-                      setSelectQuery("");
-                      navigate(`/p/${encodeURIComponent(project.path)}/context`);
-                    }}
-                  >
-                    <div className="listTitle">{project.name}</div>
-                    <div className="listMeta">{project.path}</div>
-                  </button>
-                ))}
-                {filteredProjects.length === 0 ? <div className="muted">No matching projects.</div> : null}
-              </div>
-            ) : null}
-          </div>
-        </Modal>
-      ) : null}
 
       {createOpen ? (
         <Modal
@@ -363,4 +289,19 @@ export default function App() {
 
 function providerLabel(provider: LlmProvider) {
   return provider === "openai" ? "OpenAI" : "Anthropic";
+}
+
+function SettingsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path
+        d="M6.9 1.8h2.2l.4 1.6c.4.1.7.3 1 .5l1.5-.5 1.1 1.9-1.2 1.1c.1.4.1.8 0 1.2l1.2 1.1-1.1 1.9-1.5-.5c-.3.2-.6.4-1 .5l-.4 1.6H6.9l-.4-1.6c-.4-.1-.7-.3-1-.5l-1.5.5-1.1-1.9 1.2-1.1C4 8 4 7.6 4.1 7.2L2.9 6.1 4 4.2l1.5.5c.3-.2.6-.4 1-.5z"
+        fill="none"
+        stroke="currentColor"
+        strokeLinejoin="round"
+        strokeWidth="1.4"
+      />
+      <circle cx="8" cy="8" r="2.1" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
 }

@@ -59,9 +59,9 @@ select {
 }
 
 .topbarInner {
-  display: flex;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 42px;
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   padding: 14px 18px;
 }
@@ -81,6 +81,11 @@ select {
 
 .brandButton:hover {
   background: transparent;
+}
+
+.headerIdentity {
+  min-width: 0;
+  text-align: center;
 }
 
 .brandMark {
@@ -111,7 +116,18 @@ select {
 .appBar {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
+}
+
+.appBarSettingsButton {
+  width: 34px;
+  height: 34px;
+}
+
+.appBarSettingsButton:hover {
+  background: var(--panel);
+  border-color: var(--ink);
 }
 
 .menu {
@@ -1881,8 +1897,7 @@ button.secondary {
 
 @media (max-width: 900px) {
   .topbarInner {
-    flex-direction: column;
-    align-items: stretch;
+    align-items: center;
   }
 
   .homeLayout {

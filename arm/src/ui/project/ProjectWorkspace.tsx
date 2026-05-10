@@ -1,6 +1,5 @@
 import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import { summarizeReferenceText } from "../../core/armEngine";
 import { dedupeCards, extractStructuredCardSections, normalizeGeneratedCards } from "../../core/cardGeneration";
 import {
   ChatPersonaMode,
@@ -11,14 +10,12 @@ import {
 } from "../../core/llmReview";
 import { buildPlanQuestions, PlanQuestion, PlanStage } from "../../core/planning";
 import { buildScrumReviewArtifact, reviewSessionTurns } from "../../core/reviewSession";
-import { buildPlanPages, PlanPage, replacePlanPageMarkdown } from "../../core/planPages";
 import { safeSpeechCancel, safeSpeechPause, safeSpeechResume, safeSpeechSpeak } from "../../core/speech";
 import {
   AgentCard,
   ChatNote,
   Decision,
   DiagramEntity,
-  DocumentType,
   NewAgentCardInput,
   ProjectDocument,
   ProjectReference,
@@ -27,46 +24,21 @@ import {
   projectStore,
 } from "../../core/projectStore";
 import Modal from "../shared/Modal";
+import AddDocumentModal from "./AddDocumentModal";
 import { buildSidebarItems, CardFilter } from "./cardSidebar";
-import DiagramCanvas from "./DiagramCanvas";
-import MarkdownReader from "./MarkdownReader";
-import PlanDiagramCanvas from "./PlanDiagramCanvas";
-import PlanFolderView from "./PlanFolderView";
 import PlanningModal from "./PlanningModal";
-import { CopyIcon, LightningIcon, MegaphoneIcon, PencilIcon, PlusIcon, SaveIcon, TrashIcon } from "./ProjectIcons";
-import ReferenceDropZone from "./ReferenceDropZone";
+import ProjectCenterPane from "./ProjectCenterPane";
 import ReviewRail from "./ReviewRail";
 import ReviewSessionModal from "./ReviewSessionModal";
 import WorkspaceSidebar from "./WorkspaceSidebar";
-import { FocusFrame, NavButton } from "./WorkspaceShell";
+import { useDocumentWorkflow } from "./useDocumentWorkflow";
+import { acceptedReferenceTypes, useReferenceWorkflow } from "./useReferenceWorkflow";
 
 type ViewKey = "context" | "notes" | "decisions" | "references" | "document";
 type ChatMode = "chat" | "product" | "technical" | "security";
 type ReviewTarget = ChatMode | "allPersonas";
 type ResolveKind = "patch" | "decision" | "open_question";
 type DiagramMode = "diagram" | "code";
-
-const acceptedReferenceTypes = [
-  ".txt",
-  ".md",
-  ".markdown",
-  ".json",
-  ".yml",
-  ".yaml",
-  ".toml",
-  ".csv",
-  ".ts",
-  ".tsx",
-  ".js",
-  ".jsx",
-  ".rs",
-  ".go",
-  ".py",
-  ".java",
-  ".cs",
-  ".html",
-  ".css",
-];
 
 export default function ProjectWorkspace() {
   const params = useParams();
@@ -97,15 +69,6 @@ export default function ProjectWorkspace() {
   const [showAllCards, setShowAllCards] = React.useState(false);
   const [showDismissedCards, setShowDismissedCards] = React.useState(false);
 
-  const [addDocumentOpen, setAddDocumentOpen] = React.useState(false);
-  const [newDocumentName, setNewDocumentName] = React.useState("");
-  const [newDocumentKind, setNewDocumentKind] = React.useState<"text" | "diagram">("text");
-  const [newDocumentType, setNewDocumentType] = React.useState<DocumentType>("IDEA");
-  const [newDocumentStatus, setNewDocumentStatus] = React.useState<string | null>(null);
-  const [repositoryPanelOpen, setRepositoryPanelOpen] = React.useState(false);
-  const [repositoryInput, setRepositoryInput] = React.useState("");
-  const [repositoryProcessing, setRepositoryProcessing] = React.useState(false);
-  const [repositoryStatus, setRepositoryStatus] = React.useState<string | null>(null);
   const [diagramMode, setDiagramMode] = React.useState<DiagramMode>("diagram");
   const [diagramMermaidDraft, setDiagramMermaidDraft] = React.useState("");
   const [diagramCodeEditing, setDiagramCodeEditing] = React.useState(false);
@@ -158,6 +121,24 @@ export default function ProjectWorkspace() {
   const sourceDocuments = documents.filter((document) => document.type !== "PLAN");
   const planDocuments = documents.filter((document) => document.type === "PLAN");
   const rightRailOpen = rightRailWidth >= 220;
+  const referenceWorkflow = useReferenceWorkflow({ projectPath, setBusy, setStatus, refreshAll });
+  const documentWorkflow = useDocumentWorkflow({
+    projectPath,
+    activeDocument,
+    documentMarkdown,
+    setBusy,
+    setStatus,
+    setErrorModalMessage,
+    setActiveDocument,
+    setDocumentMarkdown,
+    setDocumentMarkdownEditing,
+    setActivePlanPageIndex,
+    setDiagramMermaidDraft,
+    setDiagramCodeEditing,
+    setPlanGenerating,
+    refreshAll,
+    navigate,
+  });
 
   React.useEffect(() => {
     if (!projectPath) return;
@@ -246,136 +227,6 @@ export default function ProjectWorkspace() {
       setStatus(typeof error === "string" ? error : error?.message || "Failed to load project.");
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function saveDocumentNow() {
-    if (!activeDocument) return;
-    setBusy(true);
-    try {
-      await projectStore.saveDocument(projectPath, activeDocument.id, documentMarkdown);
-      setDocumentMarkdownEditing(false);
-      setStatus("Document saved.");
-      await refreshAll();
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Save failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function savePlanPageNow(page: PlanPage, content: string) {
-    if (!activeDocument || activeDocument.type !== "PLAN" || page.kind !== "document") return;
-    const nextMarkdown = replacePlanPageMarkdown(documentMarkdown, page, content);
-    setBusy(true);
-    try {
-      await projectStore.saveDocument(projectPath, activeDocument.id, nextMarkdown);
-      setDocumentMarkdown(nextMarkdown);
-      setStatus(`${page.title} saved.`);
-      await refreshAll();
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Plan page save failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deletePlanNow(document: ProjectDocument) {
-    if (document.type !== "PLAN") return;
-    const confirmed = window.confirm(`Delete plan "${document.name}"?`);
-    if (!confirmed) return;
-
-    setBusy(true);
-    try {
-      await projectStore.deleteDocument(projectPath, document.id);
-      setActiveDocument(null);
-      setDocumentMarkdown("");
-      setActivePlanPageIndex(0);
-      await refreshAll();
-      navigate(`/p/${encodeURIComponent(projectPath)}/context`);
-      setStatus("Plan deleted.");
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Delete failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteDiagramNow(document: ProjectDocument) {
-    if (document.type !== "diagram") return;
-    const confirmed = window.confirm(`Delete diagram "${document.name}"?`);
-    if (!confirmed) return;
-
-    setBusy(true);
-    try {
-      await projectStore.deleteDocument(projectPath, document.id);
-      setActiveDocument(null);
-      setDocumentMarkdown("");
-      setDiagramMermaidDraft("");
-      setDiagramCodeEditing(false);
-      await refreshAll();
-      navigate(`/p/${encodeURIComponent(projectPath)}/context`);
-      setStatus("Diagram deleted.");
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Delete failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deletePrdNow(document: ProjectDocument) {
-    if (document.type !== "PRD") return;
-    const confirmed = window.confirm(`Delete PRD "${document.name}"?`);
-    if (!confirmed) return;
-
-    setBusy(true);
-    try {
-      await projectStore.deleteDocument(projectPath, document.id);
-      setActiveDocument(null);
-      setDocumentMarkdown("");
-      await refreshAll();
-      navigate(`/p/${encodeURIComponent(projectPath)}/context`);
-      setStatus("PRD deleted.");
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Delete failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function copyDocumentNow() {
-    if (!activeDocument) return;
-    try {
-      await navigator.clipboard.writeText(documentMarkdown);
-      setStatus("Document copied.");
-    } catch (error: any) {
-      setErrorModalMessage(typeof error === "string" ? error : error?.message || "Copy failed.");
-    }
-  }
-
-  async function createDocument() {
-    const trimmed = newDocumentName.trim();
-    if (trimmed.length < 2) {
-      setNewDocumentStatus("Document name too short.");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const documentType = newDocumentKind === "diagram" ? "diagram" : newDocumentType;
-      const document = await projectStore.createDocument(projectPath, trimmed, documentType);
-      setAddDocumentOpen(false);
-      setNewDocumentName("");
-      setNewDocumentKind("text");
-      setNewDocumentType("IDEA");
-      setNewDocumentStatus(null);
-      await refreshAll();
-      navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`);
-    } catch (error: any) {
-      setNewDocumentStatus(typeof error === "string" ? error : error?.message || "Create failed.");
-    } finally {
-      setBusy(false);
-      setPlanGenerating(false);
     }
   }
 
@@ -910,98 +761,6 @@ export default function ProjectWorkspace() {
     }
   }
 
-  async function handlePickedFiles(fileList: FileList | null) {
-    if (!fileList || fileList.length === 0) return;
-
-    const referenceInputs = await Promise.all(
-      Array.from(fileList)
-        .filter((file) => isReferenceFile(file.name))
-        .map(async (file) => {
-          const extractedText = await safeReadText(file);
-          return {
-            fileName: file.name,
-            filePath: "webkitRelativePath" in file && file.webkitRelativePath ? file.webkitRelativePath : file.name,
-            extractedText,
-            summary: extractedText ? summarizeReferenceText(extractedText) : null,
-          };
-        }),
-    );
-
-    if (referenceInputs.length === 0) {
-      setStatus("No supported text references were selected.");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      await projectStore.addReferences(projectPath, referenceInputs);
-      setStatus("References added.");
-      await refreshAll();
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Failed to add references.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function toggleReference(reference: ProjectReference) {
-    setBusy(true);
-    try {
-      await projectStore.updateReference(projectPath, reference.id, { isSelected: !reference.isSelected });
-      await refreshAll();
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Reference update failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function summarizeReference(reference: ProjectReference) {
-    const summary = summarizeReferenceText(reference.extractedText || "");
-    setBusy(true);
-    try {
-      await projectStore.updateReference(projectPath, reference.id, { summary });
-      await refreshAll();
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Summary failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function removeReference(reference: ProjectReference) {
-    setBusy(true);
-    try {
-      await projectStore.removeReference(projectPath, reference.id);
-      await refreshAll();
-    } catch (error: any) {
-      setStatus(typeof error === "string" ? error : error?.message || "Remove failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function processRepositoryReferenceNow() {
-    const trimmed = repositoryInput.trim();
-    if (!trimmed) {
-      setRepositoryStatus("Enter a GitHub repo URL or git clone command.");
-      return;
-    }
-
-    setRepositoryProcessing(true);
-    setRepositoryStatus("Cloning and processing repository...");
-    try {
-      const reference = await projectStore.processRepositoryReference(projectPath, trimmed);
-      setRepositoryInput("");
-      setRepositoryStatus(`${reference.fileName} indexed as a repository reference.`);
-      await refreshAll();
-    } catch (error: any) {
-      setRepositoryStatus(typeof error === "string" ? error : error?.message || "Repository processing failed.");
-    } finally {
-      setRepositoryProcessing(false);
-    }
-  }
-
   return (
     <div
       className={
@@ -1026,13 +785,89 @@ export default function ProjectWorkspace() {
         busy={busy}
         onToggleCollapsed={() => setNavCollapsed((value) => !value)}
         onNavigate={navigate}
-        onAddDocument={() => setAddDocumentOpen(true)}
-        onDeleteDiagram={(document) => void deleteDiagramNow(document)}
-        onDeletePrd={(document) => void deletePrdNow(document)}
-        onDeletePlan={(document) => void deletePlanNow(document)}
+        onAddDocument={() => documentWorkflow.setAddDocumentOpen(true)}
+        onDeleteDiagram={(document) => void documentWorkflow.deleteDiagramNow(document)}
+        onDeletePrd={(document) => void documentWorkflow.deletePrdNow(document)}
+        onDeletePlan={(document) => void documentWorkflow.deletePlanNow(document)}
       />
 
-      <section className="focusPane workspaceFocus">{renderCenterPane()}</section>
+      <section className="focusPane workspaceFocus">
+        <ProjectCenterPane
+          currentView={currentView}
+          activeDocument={activeDocument}
+          notes={{ notes, onUseChatMode: () => setChatMode("chat") }}
+          decisions={{ decisions, onOpenUpdate: () => setUpdateOpen(true) }}
+          references={{
+            references,
+            repositoryPanelOpen: referenceWorkflow.repositoryPanelOpen,
+            repositoryInput: referenceWorkflow.repositoryInput,
+            repositoryProcessing: referenceWorkflow.repositoryProcessing,
+            repositoryStatus: referenceWorkflow.repositoryStatus,
+            filesInputRef,
+            folderInputRef,
+            onRepositoryPanelOpenChange: referenceWorkflow.setRepositoryPanelOpen,
+            onRepositoryInputChange: referenceWorkflow.setRepositoryInput,
+            onProcessRepository: () => void referenceWorkflow.processRepositoryReferenceNow(),
+            onPickedFiles: (files) => void referenceWorkflow.handlePickedFiles(files),
+            onToggleReference: (reference) => void referenceWorkflow.toggleReference(reference),
+            onSummarizeReference: (reference) => void referenceWorkflow.summarizeReference(reference),
+            onRemoveReference: (reference) => void referenceWorkflow.removeReference(reference),
+          }}
+          diagram={{
+            mode: diagramMode,
+            mermaidDraft: diagramMermaidDraft,
+            codeEditing: diagramCodeEditing,
+            busy,
+            status,
+            onModeChange: setDiagramMode,
+            onDraftChange: setDiagramMermaidDraft,
+            onCodeEditingChange: setDiagramCodeEditing,
+            onSaveCode: () => void saveDiagramCodeNow(),
+            onOpenAddCard: openAddDiagramCard,
+          }}
+          plan={{
+            markdown: documentMarkdown,
+            activePageIndex: activePlanPageIndex,
+            busy,
+            reviewGenerating,
+            onActivePageChange: setActivePlanPageIndex,
+            onSavePage: documentWorkflow.savePlanPageNow,
+            onDelete: (document) => void documentWorkflow.deletePlanNow(document),
+            onRerun: rerunPlan,
+            onGenerateScrumReview: () => void generateScrumReviewAudioNow(),
+            onCopy: () => void documentWorkflow.copyDocumentNow(),
+            onSave: () => void documentWorkflow.saveDocumentNow(),
+          }}
+          markdownDocument={{
+            document: activeDocument,
+            markdown: documentMarkdown,
+            editing: documentMarkdownEditing,
+            busy,
+            reviewGenerating,
+            sourceDocumentCount: sourceDocuments.length,
+            onOpenUpdate: () => setUpdateOpen(true),
+            onGenerateScrumReview: () => void generateScrumReviewAudioNow(),
+            onOpenPlanning: openPlanning,
+            onMarkdownChange: setDocumentMarkdown,
+            onEditingChange: setDocumentMarkdownEditing,
+            onCopy: () => void documentWorkflow.copyDocumentNow(),
+            onSave: () => void documentWorkflow.saveDocumentNow(),
+            isPlanningSourceDocument,
+          }}
+          context={{
+            document: activeDocument,
+            markdown: documentMarkdown,
+            busy,
+            status,
+            sourceDocumentCount: sourceDocuments.length,
+            onOpenUpdate: () => setUpdateOpen(true),
+            onOpenPlanning: openPlanning,
+            onMarkdownChange: setDocumentMarkdown,
+            onCopy: () => void documentWorkflow.copyDocumentNow(),
+            onSave: () => void documentWorkflow.saveDocumentNow(),
+          }}
+        />
+      </section>
 
       <ReviewRail
         open={rightRailOpen}
@@ -1069,7 +904,7 @@ export default function ProjectWorkspace() {
         accept={acceptedReferenceTypes.join(",")}
         multiple
         hidden
-        onChange={(event) => void handlePickedFiles(event.target.files)}
+        onChange={(event) => void referenceWorkflow.handlePickedFiles(event.target.files)}
       />
       <input
         ref={folderInputRef}
@@ -1077,58 +912,22 @@ export default function ProjectWorkspace() {
         hidden
         multiple
         {...({ webkitdirectory: "true", directory: "true" } as any)}
-        onChange={(event) => void handlePickedFiles(event.target.files)}
+        onChange={(event) => void referenceWorkflow.handlePickedFiles(event.target.files)}
       />
 
-      {addDocumentOpen ? (
-        <Modal
-          title="Add Document"
-          onClose={() => setAddDocumentOpen(false)}
-          footer={
-            <>
-              <button type="button" className="secondary" onClick={() => setAddDocumentOpen(false)}>
-                Cancel
-              </button>
-              <button type="button" className="primary" onClick={createDocument} disabled={busy}>
-                Add
-              </button>
-            </>
-          }
-        >
-          <div className="stack">
-            <div className="segmentedControl documentKindBar">
-              {(["text", "diagram"] as const).map((kind) => (
-                <button
-                  key={kind}
-                  type="button"
-                  className={"segmentedPill" + (newDocumentKind === kind ? " active" : "")}
-                  onClick={() => setNewDocumentKind(kind)}
-                >
-                  {kind === "text" ? "Text" : "Diagram"}
-                </button>
-              ))}
-            </div>
-            <input
-              autoFocus
-              className="textInput"
-              value={newDocumentName}
-              placeholder="Document name"
-              onChange={(event) => setNewDocumentName(event.target.value)}
-            />
-            {newDocumentKind === "text" ? (
-              <select
-                className="selectInput"
-                value={newDocumentType}
-                onChange={(event) => setNewDocumentType(event.target.value as DocumentType)}
-              >
-                <option value="IDEA">IDEA</option>
-                <option value="PRD">PRD</option>
-                <option value="PLAN">PLAN</option>
-              </select>
-            ) : null}
-            {newDocumentStatus ? <div className="status">{newDocumentStatus}</div> : null}
-          </div>
-        </Modal>
+      {documentWorkflow.addDocumentOpen ? (
+        <AddDocumentModal
+          busy={busy}
+          name={documentWorkflow.newDocumentName}
+          kind={documentWorkflow.newDocumentKind}
+          type={documentWorkflow.newDocumentType}
+          status={documentWorkflow.newDocumentStatus}
+          onClose={() => documentWorkflow.setAddDocumentOpen(false)}
+          onCreate={documentWorkflow.createDocument}
+          onNameChange={documentWorkflow.setNewDocumentName}
+          onKindChange={documentWorkflow.setNewDocumentKind}
+          onTypeChange={documentWorkflow.setNewDocumentType}
+        />
       ) : null}
 
       {addDiagramCardOpen && activeDocument?.type === "diagram" ? (
@@ -1355,447 +1154,7 @@ export default function ProjectWorkspace() {
     </div>
   );
 
-  function renderCenterPane() {
-    if (currentView === "notes") {
-      return (
-        <FocusFrame
-          title="Chat Notes"
-          description="Messy thinking lives here. Notes do not become project truth until they are turned into decisions or accepted cards."
-          actions={<button type="button" className="secondary" onClick={() => setChatMode("chat")}>Use chat mode</button>}
-        >
-          <div className="scrollPanel stack">
-            {notes.map((note) => (
-              <div key={note.id} className="feedItem">
-                <div className="feedMeta">{formatTime(note.createdAt)}</div>
-                <div>{note.text}</div>
-              </div>
-            ))}
-            {notes.length === 0 ? <div className="muted">No chat notes yet.</div> : null}
-          </div>
-        </FocusFrame>
-      );
-    }
 
-    if (currentView === "decisions") {
-      return (
-        <FocusFrame
-          title="Decisions"
-          description="Decisions are explicit project truth. They feed the next context rewrite."
-          actions={<button type="button" className="primary" onClick={() => setUpdateOpen(true)}>Update</button>}
-        >
-          <div className="scrollPanel stack">
-            {decisions.map((decision) => (
-              <div key={decision.id} className="feedItem">
-                <div className="feedMeta">{formatTime(decision.createdAt)}</div>
-                <div className="reviewCardTitle">{decision.text}</div>
-                {decision.reason ? <div className="surfaceCopy">{decision.reason}</div> : null}
-              </div>
-            ))}
-            {decisions.length === 0 ? <div className="muted">No decisions yet.</div> : null}
-          </div>
-        </FocusFrame>
-      );
-    }
-
-    if (currentView === "references") {
-      return (
-        <FocusFrame
-          title="References"
-          description="Attach files or folders, choose what stays in play, and summarize only the parts that should influence the living context."
-          actions={
-            <div className="row">
-              <button type="button" className="secondary" onClick={() => filesInputRef.current?.click()}>
-                Add File
-              </button>
-              <button type="button" className="secondary" onClick={() => folderInputRef.current?.click()}>
-                Add Folder
-              </button>
-              <button type="button" className="secondary" onClick={() => setRepositoryPanelOpen(true)}>
-                Add Repository
-              </button>
-            </div>
-          }
-        >
-          {repositoryPanelOpen ? (
-            <div className="referenceRepositoryPanel">
-              <label className="fieldLabel" htmlFor="repository-reference-input">Repository URL or clone command</label>
-              <div className="repositoryInputRow">
-                <input
-                  id="repository-reference-input"
-                  className="textInput"
-                  value={repositoryInput}
-                  onChange={(event) => setRepositoryInput(event.target.value)}
-                  placeholder="git clone https://github.com/org/repo.git"
-                  disabled={repositoryProcessing}
-                />
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={repositoryProcessing || !repositoryInput.trim()}
-                  onClick={() => void processRepositoryReferenceNow()}
-                >
-                  {repositoryProcessing ? "Processing..." : "Process Repository"}
-                </button>
-              </div>
-              {repositoryStatus ? <div className="status">{repositoryStatus}</div> : null}
-            </div>
-          ) : null}
-          <ReferenceDropZone
-            onFiles={(files) => void handlePickedFiles(files)}
-            onPickFiles={() => filesInputRef.current?.click()}
-          />
-          <div className="scrollPanel stack">
-            {references.map((reference) => (
-              <div key={reference.id} className="referenceCard">
-                <div className="referenceHeader">
-                  <div>
-                    <div className="reviewCardTitle">{reference.fileName}</div>
-                    <div className="feedMeta">
-                      Type: {reference.type === "repository" ? "Repository Summary" : "File"} · Status: Indexed
-                    </div>
-                    <div className="feedMeta">{reference.sourceUrl || reference.filePath || "Uploaded reference"}</div>
-                  </div>
-                  <label className="referenceToggle">
-                    <input type="checkbox" checked={reference.isSelected} onChange={() => void toggleReference(reference)} />
-                    <span>Selected</span>
-                  </label>
-                </div>
-                <div className="surfaceCopy">
-                  {reference.summary || "No summary yet."}
-                </div>
-                <div className="referenceActions">
-                  <button type="button" className="secondary" onClick={() => void summarizeReference(reference)}>
-                    Generate Summary
-                  </button>
-                  <button type="button" className="secondary" onClick={() => void removeReference(reference)}>
-                    Remove
-                  </button>
-                </div>
-              </div>
-            ))}
-            {references.length === 0 ? <div className="muted">No references attached yet.</div> : null}
-          </div>
-        </FocusFrame>
-      );
-    }
-
-    if (currentView === "document") {
-      if (activeDocument?.type === "diagram") {
-        return (
-          <FocusFrame
-            title={activeDocument.name}
-            description="Diagram document"
-            actions={
-              <div className="row">
-                <button
-                  type="button"
-                  className="iconButton"
-                  title="Copy Mermaid"
-                  aria-label="Copy Mermaid"
-                  onClick={() => void navigator.clipboard.writeText(diagramMermaidDraft)}
-                >
-                  <CopyIcon />
-                </button>
-                {diagramMode === "code" ? (
-                  <>
-                    <button
-                      type="button"
-                      className={"iconButton" + (diagramCodeEditing ? " active" : "")}
-                      title="Edit diagram code"
-                      aria-label="Edit diagram code"
-                      disabled={busy}
-                      onClick={() => setDiagramCodeEditing(true)}
-                    >
-                      <PencilIcon />
-                    </button>
-                    {diagramCodeEditing ? (
-                      <button
-                        type="button"
-                        className="iconButton iconButton-primary"
-                        title="Save diagram code"
-                        aria-label="Save diagram code"
-                        disabled={busy}
-                        onClick={() => void saveDiagramCodeNow()}
-                      >
-                        <SaveIcon />
-                      </button>
-                    ) : null}
-                  </>
-                ) : null}
-              </div>
-            }
-          >
-            <div className="diagramDocument">
-              <div className="segmentedControl diagramModeBar">
-                {(["diagram", "code"] as DiagramMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={"segmentedPill" + (diagramMode === mode ? " active" : "")}
-                    onClick={() => setDiagramMode(mode)}
-                  >
-                    {mode === "diagram" ? "DIAGRAM" : "CODE"}
-                  </button>
-                ))}
-              </div>
-              <div className="diagramViewport">
-                {diagramMode === "diagram" ? (
-                  <DiagramCanvas entities={activeDocument.entities || []} mermaid={activeDocument.mermaid || ""} />
-                ) : (
-                  <textarea
-                    className="documentEditor diagramCode"
-                    value={diagramMermaidDraft}
-                    onChange={(event) => setDiagramMermaidDraft(event.target.value)}
-                    readOnly={!diagramCodeEditing}
-                    spellCheck={false}
-                  />
-                )}
-              </div>
-              <div className="diagramFooter">
-                <button type="button" className="primary" onClick={openAddDiagramCard}>
-                  Add Card
-                </button>
-              </div>
-            </div>
-            {status ? <div className="workspaceStatus">{status}</div> : null}
-          </FocusFrame>
-        );
-      }
-
-      if (activeDocument?.type === "PLAN") {
-        const planPages = buildPlanPages(documentMarkdown);
-        const activePage = planPages[Math.min(activePlanPageIndex, Math.max(0, planPages.length - 1))];
-        return (
-          <FocusFrame
-            title={activeDocument.name}
-            description="Plan folder"
-            actions={
-              <div className="row">
-                <button
-                  type="button"
-                  className="iconButton dangerIconButton"
-                  title="Delete plan"
-                  aria-label="Delete plan"
-                  disabled={busy}
-                  onClick={() => void deletePlanNow(activeDocument)}
-                >
-                  <TrashIcon />
-                </button>
-                <button
-                  type="button"
-                  className="iconButton"
-                  title="Re-plan"
-                  aria-label="Re-plan"
-                  onClick={() => rerunPlan(activeDocument)}
-                >
-                  <LightningIcon />
-                </button>
-                <button
-                  type="button"
-                  className="iconButton"
-                  title="Generate Scrum Review Audio"
-                  aria-label="Generate Scrum Review Audio"
-                  disabled={busy || reviewGenerating}
-                  onClick={() => void generateScrumReviewAudioNow()}
-                >
-                  <MegaphoneIcon />
-                </button>
-                <button
-                  type="button"
-                  className="iconButton"
-                  title="Copy plan"
-                  aria-label="Copy plan"
-                  onClick={() => void copyDocumentNow()}
-                >
-                  <CopyIcon />
-                </button>
-                <button
-                  type="button"
-                  className="iconButton iconButton-primary"
-                  title="Save plan"
-                  aria-label="Save plan"
-                  disabled={busy}
-                  onClick={() => void saveDocumentNow()}
-                >
-                  <SaveIcon />
-                </button>
-              </div>
-            }
-          >
-            <PlanFolderView
-              pages={planPages}
-              activePageIndex={activePlanPageIndex}
-              onPageChange={setActivePlanPageIndex}
-              activePage={activePage}
-              busy={busy}
-              onSavePage={(page, content) => savePlanPageNow(page, content)}
-            />
-          </FocusFrame>
-        );
-      }
-
-      return (
-        <FocusFrame
-          title={activeDocument?.name || "Document"}
-          description={activeDocument ? `${activeDocument.type} document` : "Select a document from the left column."}
-          actions={
-            <div className="row">
-              {isPlanningSourceDocument(activeDocument, documentMarkdown) ? (
-                <>
-                  <button
-                    type="button"
-                    className="iconButton"
-                    title="Update document"
-                    aria-label="Update document"
-                    disabled={!activeDocument}
-                    onClick={() => setUpdateOpen(true)}
-                  >
-                    <PlusIcon />
-                  </button>
-                  {activeDocument?.type === "PRD" ? (
-                    <button
-                      type="button"
-                      className={"iconButton" + (documentMarkdownEditing ? " active" : "")}
-                      title="Edit markdown"
-                      aria-label="Edit markdown"
-                      disabled={!activeDocument}
-                      onClick={() => setDocumentMarkdownEditing(true)}
-                    >
-                      <PencilIcon />
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="iconButton"
-                    title="Generate Scrum Review Audio"
-                    aria-label="Generate Scrum Review Audio"
-                    disabled={!activeDocument || busy || reviewGenerating}
-                    onClick={() => void generateScrumReviewAudioNow()}
-                  >
-                    <MegaphoneIcon />
-                  </button>
-                  <button
-                    type="button"
-                    className="iconButton"
-                    title="Plan mode"
-                    aria-label="Plan mode"
-                    disabled={sourceDocuments.length === 0}
-                    onClick={openPlanning}
-                  >
-                    <LightningIcon />
-                  </button>
-                </>
-              ) : null}
-              <button
-                type="button"
-                className="iconButton"
-                title="Copy document"
-                aria-label="Copy document"
-                disabled={!activeDocument}
-                onClick={() => void copyDocumentNow()}
-              >
-                <CopyIcon />
-              </button>
-              <button
-                type="button"
-                className="iconButton iconButton-primary"
-                title="Save document"
-                aria-label="Save document"
-                disabled={!activeDocument || busy}
-                onClick={() => void saveDocumentNow()}
-              >
-                <SaveIcon />
-              </button>
-            </div>
-          }
-        >
-          {activeDocument?.type === "PRD" && !documentMarkdownEditing ? (
-            <MarkdownReader markdown={documentMarkdown} />
-          ) : (
-            <textarea
-              className="documentEditor"
-              value={documentMarkdown}
-              onChange={(event) => setDocumentMarkdown(event.target.value)}
-              disabled={!activeDocument}
-              spellCheck={false}
-            />
-          )}
-        </FocusFrame>
-      );
-    }
-
-    return (
-      <FocusFrame
-        title={activeDocument?.name || "No context document yet"}
-        description={
-          activeDocument
-            ? "The selected document is the context source of truth for review and update flows."
-            : "This project has no context yet. Create a document to establish the working truth."
-        }
-        actions={
-          <div className="row">
-            <button
-              type="button"
-              className="iconButton"
-              title="Update document"
-              aria-label="Update document"
-              disabled={!activeDocument}
-              onClick={() => setUpdateOpen(true)}
-            >
-              <PlusIcon />
-            </button>
-            <button
-              type="button"
-              className="iconButton"
-              title="Plan mode"
-              aria-label="Plan mode"
-              disabled={sourceDocuments.length === 0}
-              onClick={openPlanning}
-            >
-              <LightningIcon />
-            </button>
-            <button
-              type="button"
-              className="iconButton"
-              title="Copy document"
-              aria-label="Copy document"
-              disabled={!activeDocument}
-              onClick={() => void copyDocumentNow()}
-            >
-              <CopyIcon />
-            </button>
-            <button
-              type="button"
-              className="iconButton iconButton-primary"
-              title="Save document"
-              aria-label="Save document"
-              disabled={busy || !activeDocument}
-              onClick={() => void saveDocumentNow()}
-            >
-              <SaveIcon />
-            </button>
-          </div>
-        }
-      >
-        {activeDocument ? (
-          <textarea
-            className="documentEditor"
-            value={documentMarkdown}
-            onChange={(event) => setDocumentMarkdown(event.target.value)}
-            spellCheck={false}
-          />
-        ) : (
-          <div className="emptyContextState">
-            <div className="surfaceTitle">No context document</div>
-            <div className="surfaceCopy">
-              Create a document first. That selected document becomes the source of truth for current queries.
-            </div>
-          </div>
-        )}
-        {status ? <div className="workspaceStatus">{status}</div> : null}
-      </FocusFrame>
-    );
-  }
 }
 
 function parseRoute(pathname: string): { view: ViewKey; documentId: string | null } {
@@ -1810,11 +1169,6 @@ function parseRoute(pathname: string): { view: ViewKey; documentId: string | nul
 
 function formatTime(value: string) {
   return new Date(value).toLocaleString();
-}
-
-function isReferenceFile(name: string) {
-  const lowered = name.toLowerCase();
-  return acceptedReferenceTypes.some((suffix) => lowered.endsWith(suffix));
 }
 
 function formatPlanTimecode(date: Date) {
@@ -1915,12 +1269,4 @@ function sourceAgentLabel(mode: ReviewTarget) {
   return "ARM Assistant";
 }
 
-async function safeReadText(file: File) {
-  try {
-    const text = await file.text();
-    return text.slice(0, 16000);
-  } catch {
-    return null;
-  }
-}
 
