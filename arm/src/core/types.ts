@@ -174,7 +174,7 @@ export type ProjectStore = {
     activeDocumentId: string | null;
     currentDocumentMarkdown: string;
     focusLine: string;
-    agentType: "product" | "technical" | "security" | "everything";
+    agentType: "product" | "technical" | "security" | "allPersonas";
     limit?: number;
   }): Promise<RetrievedMemoryChunk[]>;
   createAgentCards(projectPath: string, sourceAgent: string, cards: NewAgentCardInput[]): Promise<AgentCard[]>;

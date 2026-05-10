@@ -1032,10 +1032,6 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.segmentedControl.planModeBar {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .segmentedControl.documentKindBar,
 .segmentedControl.diagramModeBar {
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1044,7 +1040,6 @@ button:disabled {
 .segmentedControl.sidebarFeatureBar .segmentedPill,
 .segmentedControl.sidebarActionBar .segmentedPill,
 .segmentedControl.resolveActionBar .segmentedPill,
-.segmentedControl.planModeBar .segmentedPill,
 .segmentedControl.documentKindBar .segmentedPill,
 .segmentedControl.diagramModeBar .segmentedPill {
   min-width: 0;

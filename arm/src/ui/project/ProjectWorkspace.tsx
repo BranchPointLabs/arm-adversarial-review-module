@@ -1,16 +1,18 @@
 import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
-import { buildReviewCards, summarizeReferenceText } from "../../core/armEngine";
+import { summarizeReferenceText } from "../../core/armEngine";
+import { dedupeCards, extractStructuredCardSections, normalizeGeneratedCards } from "../../core/cardGeneration";
 import {
   ChatPersonaMode,
   generateChatCardsWithLlm,
-  generateChatReplyWithLlm,
   generateDocumentUpdateWithLlm,
   generatePlanWithLlm,
   generateReviewCardsWithLlm,
 } from "../../core/llmReview";
-import { buildFallbackPlanModel, renderPlanMarkdown } from "../../core/planModel";
-import { buildPlanQuestions, PlanMode, PlanQuestion, PlanStage } from "../../core/planning";
+import { buildPlanQuestions, PlanQuestion, PlanStage } from "../../core/planning";
+import { buildScrumReviewArtifact, reviewSessionTurns } from "../../core/reviewSession";
+import { buildPlanPages, PlanPage, replacePlanPageMarkdown } from "../../core/planPages";
+import { safeSpeechCancel, safeSpeechPause, safeSpeechResume, safeSpeechSpeak } from "../../core/speech";
 import {
   AgentCard,
   ChatNote,
@@ -25,11 +27,22 @@ import {
   projectStore,
 } from "../../core/projectStore";
 import Modal from "../shared/Modal";
-import { buildSidebarItems, cardFilterLabel, CardFilter, countCards, SidebarItemView } from "./cardSidebar";
-import PlanModeModal from "./PlanModeModal";
+import { buildSidebarItems, CardFilter } from "./cardSidebar";
+import DiagramCanvas from "./DiagramCanvas";
+import MarkdownReader from "./MarkdownReader";
+import PlanDiagramCanvas from "./PlanDiagramCanvas";
+import PlanFolderView from "./PlanFolderView";
+import PlanningModal from "./PlanningModal";
+import { CopyIcon, LightningIcon, MegaphoneIcon, PencilIcon, PlusIcon, SaveIcon, TrashIcon } from "./ProjectIcons";
+import ReferenceDropZone from "./ReferenceDropZone";
+import ReviewRail from "./ReviewRail";
+import ReviewSessionModal from "./ReviewSessionModal";
+import WorkspaceSidebar from "./WorkspaceSidebar";
+import { FocusFrame, NavButton } from "./WorkspaceShell";
 
 type ViewKey = "context" | "notes" | "decisions" | "references" | "document";
 type ChatMode = "chat" | "product" | "technical" | "security";
+type ReviewTarget = ChatMode | "allPersonas";
 type ResolveKind = "patch" | "decision" | "open_question";
 type DiagramMode = "diagram" | "code";
 
@@ -119,7 +132,6 @@ export default function ProjectWorkspace() {
   const [planStage, setPlanStage] = React.useState<PlanStage>("setup");
   const [planSelectedDocIds, setPlanSelectedDocIds] = React.useState<string[]>([]);
   const [planContext, setPlanContext] = React.useState("");
-  const [planMode, setPlanMode] = React.useState<PlanMode>("focused");
   const [planQuestions, setPlanQuestions] = React.useState<PlanQuestion[]>([]);
   const [planStatus, setPlanStatus] = React.useState<string | null>(null);
   const [planGenerating, setPlanGenerating] = React.useState(false);
@@ -514,11 +526,10 @@ export default function ProjectWorkspace() {
     }
   }
 
-  function openPlanMode() {
+  function openPlanning() {
     const initialIds = activeDocument ? [activeDocument.id] : sourceDocuments.slice(0, 1).map((document) => document.id);
     setPlanSelectedDocIds(initialIds);
     setPlanContext("");
-    setPlanMode("focused");
     setPlanQuestions([]);
     setPlanStage("setup");
     setPlanStatus(null);
@@ -528,7 +539,6 @@ export default function ProjectWorkspace() {
   function rerunPlan(document: ProjectDocument) {
     setPlanSelectedDocIds(sourceDocuments.slice(0, 3).map((item) => item.id));
     setPlanContext(`Re-plan from existing plan: ${document.name}`);
-    setPlanMode("focused");
     setPlanQuestions([]);
     setPlanStage("setup");
     setPlanStatus(null);
@@ -547,7 +557,7 @@ export default function ProjectWorkspace() {
       setPlanStatus("Select at least one source document.");
       return;
     }
-    const questions = buildPlanQuestions(selected, getPlanningCards(), planContext, planMode);
+    const questions = buildPlanQuestions(selected, getPlanningCards(), planContext);
     setPlanQuestions(questions);
     setPlanStage("interrogation");
     setPlanStatus(null);
@@ -570,44 +580,25 @@ export default function ProjectWorkspace() {
     try {
       const planTimecode = formatPlanTimecode(new Date());
       const planName = `${selected[0]?.name || projectName} Plan ${planTimecode}`;
-      const plan = await projectStore.createDocument(projectPath, planName, "PLAN");
       const planningCards = getPlanningCards();
-      const fallbackMarkdown = ensurePlanTimecode(
-        renderPlanMarkdown(buildFallbackPlanModel({
+      const markdown = ensurePlanTimecode(
+        await generatePlanWithLlm({
           title: planName,
-          mode: planMode,
           documents: selected,
           cards: planningCards,
           context: planContext,
           questions: planQuestions,
-        })),
+        }),
         planTimecode,
       );
-      let markdown = fallbackMarkdown;
-      let usedFallback = false;
-      try {
-        markdown = ensurePlanTimecode(
-          await generatePlanWithLlm({
-            title: planName,
-            mode: planMode,
-            documents: selected,
-            cards: planningCards,
-            context: planContext,
-            questions: planQuestions,
-          }),
-          planTimecode,
-        );
-      } catch (error) {
-        usedFallback = true;
-        console.warn("[arm-plan] LLM generation failed; using deterministic fallback.", error);
-      }
+      const plan = await projectStore.createDocument(projectPath, planName, "PLAN");
       await projectStore.saveDocument(projectPath, plan.id, markdown);
       setPlanOpen(false);
       setPlanStage("setup");
       setPlanQuestions([]);
       await refreshAll();
       navigate(`/p/${encodeURIComponent(projectPath)}/documents/${plan.id}`);
-      setStatus(usedFallback ? "Plan created with local fallback because generation failed." : "Plan generated.");
+      setStatus("Plan generated.");
     } catch (error: any) {
       setPlanStatus(typeof error === "string" ? error : error?.message || "Plan creation failed.");
     } finally {
@@ -653,38 +644,25 @@ export default function ProjectWorkspace() {
     }
   }
 
-  async function buildCardsForPrompt(text: string, effectiveMode: "product" | "technical" | "security" | "everything") {
-    const heuristicFallback = (mode: "product" | "technical" | "security" | "everything") =>
-      buildContextCardsFallback(text, mode);
-
-    try {
-      if (effectiveMode === "product") {
-        const cards = await generateReviewCardsWithMode(text, "product");
-        return ensureMinimumReviewCards(cards, heuristicFallback("product"), 3);
-      }
-      if (effectiveMode === "technical" || effectiveMode === "security") {
-        const cards = await generateReviewCardsWithMode(text, effectiveMode);
-        return ensureMinimumReviewCards(cards, heuristicFallback(effectiveMode), 3);
-      }
-      const results = await Promise.allSettled([
-        generateReviewCardsWithMode(text, "product"),
-        generateReviewCardsWithMode(text, "technical"),
-        generateReviewCardsWithMode(text, "security"),
-      ]);
-      const merged = results
-        .filter((item): item is PromiseFulfilledResult<NewAgentCardInput[]> => item.status === "fulfilled")
-        .flatMap((item) => item.value);
-      const overviewCard = await generateChatInfoCard(text, "chat").catch(() => fallbackInfoCard(text));
-      const everythingCards = dedupeCards([overviewCard, ...merged]);
-      if (everythingCards.length > 0) {
-        return ensureMinimumReviewCards(everythingCards, heuristicFallback("everything"), 7).slice(0, 11);
-      }
-      throw new Error("LLM review failed.");
-    } catch (error: any) {
-      setStatus(`${typeof error === "string" ? error : error?.message || "LLM review failed."} Falling back to local review.`);
-      const mode = effectiveMode === "everything" ? "everything" : effectiveMode;
-      return ensureMinimumReviewCards([], heuristicFallback(mode), mode === "everything" ? 7 : 3);
+  async function buildCardsForPrompt(text: string, effectiveMode: Exclude<ReviewTarget, "chat">) {
+    if (effectiveMode === "product" || effectiveMode === "technical" || effectiveMode === "security") {
+      return normalizeGeneratedCards(await generateReviewCardsWithMode(text, effectiveMode), effectiveMode).slice(0, 5);
     }
+
+    const [productCards, technicalCards, securityCards] = await Promise.all([
+      generateReviewCardsWithMode(text, "product"),
+      generateReviewCardsWithMode(text, "technical"),
+      generateReviewCardsWithMode(text, "security"),
+    ]);
+    const cards = dedupeCards([
+      ...normalizeGeneratedCards(productCards, "product"),
+      ...normalizeGeneratedCards(technicalCards, "technical"),
+      ...normalizeGeneratedCards(securityCards, "security"),
+    ]);
+    if (cards.length === 0) {
+      throw new Error("No persona review cards were generated.");
+    }
+    return cards.slice(0, 12);
   }
 
   async function generateReviewCardsWithMode(text: string, mode: "product" | "technical" | "security") {
@@ -721,21 +699,11 @@ export default function ProjectWorkspace() {
     safeSpeechCancel();
 
     try {
-      const productCards = ensureMinimumReviewCards(
-        buildContextCardsFallback(reviewPrompt, "product"),
-        [],
-        3,
-      ).slice(0, 4);
-      const technicalCards = ensureMinimumReviewCards(
-        buildContextCardsFallback(reviewPrompt, "technical"),
-        [],
-        3,
-      ).slice(0, 4);
-      const securityCards = ensureMinimumReviewCards(
-        buildContextCardsFallback(reviewPrompt, "security"),
-        [],
-        3,
-      ).slice(0, 4);
+      const [productCards, technicalCards, securityCards] = await Promise.all([
+        generateReviewCardsWithMode(reviewPrompt, "product"),
+        generateReviewCardsWithMode(reviewPrompt, "technical"),
+        generateReviewCardsWithMode(reviewPrompt, "security"),
+      ]);
       const proposedCards = dedupeCards([...productCards, ...technicalCards, ...securityCards]).slice(0, 11);
 
       if (proposedCards.length === 0) {
@@ -811,8 +779,8 @@ export default function ProjectWorkspace() {
     }
   }
 
-  async function generateChatInfoCard(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput> {
-    const reply = await generateChatReplyWithLlm({
+  async function generateChatCards(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput[]> {
+    const cards = await generateChatCardsWithLlm({
       projectPath,
       prompt: text,
       mode,
@@ -822,46 +790,7 @@ export default function ProjectWorkspace() {
       decisions,
       references,
     });
-
-    return {
-      type: "info",
-      title: chatInfoCardTitle(mode),
-      body: reply,
-      proposedUpdate: null,
-      targetSection: null,
-      sourceAgent: sourceAgentLabel(mode),
-    };
-  }
-
-  async function generateChatCards(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput[]> {
-    try {
-      const cards = await generateChatCardsWithLlm({
-        projectPath,
-        prompt: text,
-        mode,
-        activeDocument,
-        currentContext: activeContextMarkdown,
-        notes,
-        decisions,
-        references,
-      });
-      return normalizeGeneratedCards(cards, mode).slice(0, 3);
-    } catch {
-      const infoCard = await generateChatInfoCard(text, mode);
-      return normalizeGeneratedCards([infoCard], mode).slice(0, 3);
-    }
-  }
-
-  function buildContextCardsFallback(text: string, mode: "product" | "technical" | "security" | "everything") {
-    return buildReviewCards({
-      prompt: text,
-      mode,
-      activeDocument,
-      currentContext: activeContextMarkdown,
-      notes,
-      decisions,
-      references,
-    });
+    return normalizeGeneratedCards(cards, mode).slice(0, 3);
   }
 
   async function buildDocumentUpdate(text: string, kind: "note" | "decision") {
@@ -1082,294 +1011,57 @@ export default function ProjectWorkspace() {
       }
       style={{ "--right-rail-width": `${rightRailWidth}px` } as React.CSSProperties}
     >
-      <aside className="navPane workspaceSidebar" aria-label="Project navigation">
-        <div className="projectLine">
-          {!navCollapsed ? <div className="projectNameLine">{projectName}</div> : null}
-          <button
-            type="button"
-            className="iconButton"
-            aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"}
-            onClick={() => setNavCollapsed((value) => !value)}
-          >
-            {navCollapsed ? ">" : "<"}
-          </button>
-        </div>
-
-        {!navCollapsed ? (
-          <>
-            <div className="workspaceNavBlock">
-              <div className="workspaceNavLabel">Project</div>
-              <button
-                type="button"
-                className={"workspaceNavItem workspaceProjectContextButton" + (currentView === "context" ? " active" : "")}
-                onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/context`)}
-              >
-                Context: {activeDocument?.name || "No document selected"}
-              </button>
-            </div>
-
-            <div className="workspaceNavBlock workspaceNavFill">
-              <div className="workspaceNavLabel">Documents</div>
-              <div className="documentList" aria-label="Documents">
-                {sourceDocuments.map((document) => (
-                  document.type === "diagram" || document.type === "PRD" ? (
-                    <div key={document.id} className={"documentNavRow" + (routeDocumentId === document.id ? " active" : "")}>
-                      <button
-                        type="button"
-                        className="documentNavItem"
-                        onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`)}
-                      >
-                        <span className="documentType">{document.type}</span>
-                        <span className="documentName">{document.name}</span>
-                      </button>
-                      <button
-                        type="button"
-                        className="iconButton dangerIconButton documentDeleteButton"
-                        title={document.type === "diagram" ? "Delete diagram" : "Delete PRD"}
-                        aria-label={`Delete ${document.type === "diagram" ? "diagram" : "PRD"} ${document.name}`}
-                        disabled={busy}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          if (document.type === "diagram") {
-                            void deleteDiagramNow(document);
-                          } else {
-                            void deletePrdNow(document);
-                          }
-                        }}
-                      >
-                        <TrashIcon />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      key={document.id}
-                      type="button"
-                      className={"documentNavItem" + (routeDocumentId === document.id ? " active" : "")}
-                      onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`)}
-                    >
-                      <span className="documentType">{document.type}</span>
-                      <span className="documentName">{document.name}</span>
-                    </button>
-                  )
-                ))}
-                {sourceDocuments.length === 0 ? <div className="documentNavEmpty">No documents yet</div> : null}
-              </div>
-              <div className="workspaceNavLabel workspaceNavLabelPrimary">References</div>
-              <div className="documentList" aria-label="References">
-                {references.map((reference) => (
-                  <button
-                    key={reference.id}
-                    type="button"
-                    className={"documentNavItem referenceNavItem" + (currentView === "references" ? " active" : "")}
-                    onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/references`)}
-                    title={reference.fileName}
-                  >
-                    <span className="documentType">REF</span>
-                    <span className="documentName">{reference.fileName}</span>
-                  </button>
-                ))}
-                {references.length === 0 ? <div className="documentNavEmpty">No references yet</div> : null}
-              </div>
-              <div className="workspaceNavLabel">Plans</div>
-              <div className="documentList" aria-label="Plans">
-                {planDocuments.map((document) => (
-                  <div key={document.id} className={"documentNavRow" + (routeDocumentId === document.id ? " active" : "")}>
-                    <button
-                      type="button"
-                      className="documentNavItem"
-                      onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`)}
-                    >
-                      <span className="documentType">PLAN</span>
-                      <span className="documentName">{document.name}</span>
-                    </button>
-                    <button
-                      type="button"
-                      className="iconButton dangerIconButton documentDeleteButton"
-                      title="Delete plan"
-                      aria-label={`Delete plan ${document.name}`}
-                      disabled={busy}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void deletePlanNow(document);
-                      }}
-                    >
-                      <TrashIcon />
-                    </button>
-                  </div>
-                ))}
-                {planDocuments.length === 0 ? <div className="documentNavEmpty">No plans yet</div> : null}
-              </div>
-              <div className="workspaceNavLabel">Decisions</div>
-              <div className="documentList" aria-label="Decisions">
-                {decisions.slice(0, 5).map((decision) => (
-                  <button
-                    key={decision.id}
-                    type="button"
-                    className={"documentNavItem decisionNavItem" + (currentView === "decisions" ? " active" : "")}
-                    onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/decisions`)}
-                    title={decision.text}
-                  >
-                    <span className="documentType">DEC</span>
-                    <span className="documentName">{decision.text}</span>
-                  </button>
-                ))}
-                {decisions.length === 0 ? <div className="documentNavEmpty">No decisions yet</div> : null}
-              </div>
-              <div className="workspaceNavLabel">Notes</div>
-              <div className="documentList" aria-label="Notes">
-                {stickyNotes.slice(0, 5).map((note) => (
-                  <button
-                    key={note.id}
-                    type="button"
-                    className={"documentNavItem noteNavItem" + (currentView === "notes" ? " active" : "")}
-                    onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/notes`)}
-                    title={note.text}
-                  >
-                    <span className="documentType">NOTE</span>
-                    <span className="documentName">{note.text}</span>
-                  </button>
-                ))}
-                {stickyNotes.length === 0 ? <div className="documentNavEmpty">No notes yet</div> : null}
-              </div>
-            </div>
-
-            <div className="documentNavFooter">
-              <button type="button" className="addDocumentButton" onClick={() => setAddDocumentOpen(true)}>
-                Add Document
-              </button>
-            </div>
-          </>
-        ) : null}
-      </aside>
+      <WorkspaceSidebar
+        navCollapsed={navCollapsed}
+        projectName={projectName}
+        projectPath={projectPath}
+        currentView={currentView}
+        routeDocumentId={routeDocumentId}
+        activeDocument={activeDocument}
+        sourceDocuments={sourceDocuments}
+        planDocuments={planDocuments}
+        references={references}
+        decisions={decisions}
+        stickyNotes={stickyNotes}
+        busy={busy}
+        onToggleCollapsed={() => setNavCollapsed((value) => !value)}
+        onNavigate={navigate}
+        onAddDocument={() => setAddDocumentOpen(true)}
+        onDeleteDiagram={(document) => void deleteDiagramNow(document)}
+        onDeletePrd={(document) => void deletePrdNow(document)}
+        onDeletePlan={(document) => void deletePlanNow(document)}
+      />
 
       <section className="focusPane workspaceFocus">{renderCenterPane()}</section>
 
-      <aside className="inputPane reviewRail unifiedSidebar" aria-label="Unified activity sidebar">
-        <div
-          className="rightRailResizeHandle"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize activity sidebar"
-          onPointerDown={(event) => {
-            draggingRightRail.current = true;
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-        />
-        {!rightRailOpen ? (
-          <button
-            type="button"
-            className="iconButton rightRailOpenButton"
-            title="Open activity sidebar"
-            aria-label="Open activity sidebar"
-            onClick={() => setRightRailWidth(420)}
-          >
-            {"<"}
-          </button>
-        ) : (
-          <>
-            <div className="segmentedControl sidebarFeatureBar">
-              {(["info", "open_question", "warning", "action"] as CardFilter[]).map((filter) => (
-                <button
-                  key={filter}
-                  type="button"
-                  className={`segmentedPill cardTypePill cardTypePill-${filter}` + (cardFilter === filter ? " active" : "")}
-                  onClick={() => setCardFilter(filter)}
-                >
-                  {cardFilterLabel(filter)} ({countCards(cards, filter, showDismissedCards)})
-                </button>
-              ))}
-            </div>
-            <div className="sidebarVisibilityControls">
-              <label className="sidebarCheckbox">
-                <input
-                  type="checkbox"
-                  checked={showAllCards}
-                  onChange={(event) => setShowAllCards(event.target.checked)}
-                />
-                <span>Show all</span>
-              </label>
-              <label className="sidebarCheckbox">
-                <input
-                  type="checkbox"
-                  checked={showDismissedCards}
-                  onChange={(event) => setShowDismissedCards(event.target.checked)}
-                />
-                <span>Show dismissed</span>
-              </label>
-              <button
-                type="button"
-                className="linkButton sidebarClearButton"
-                disabled={busy || sidebarItems.every((item) => item.card.status === "rejected")}
-                onClick={() => void clearVisibleCards()}
-              >
-                Clear all
-              </button>
-            </div>
-            <div className="inputCardList unifiedStream">
-              {sidebarItems.map((item) => (
-                <SidebarItemView
-                  key={item.id}
-                  item={item}
-                  onAccept={openResolveCard}
-                  onDismiss={(card) => void setCardStatus(card, "rejected")}
-                />
-              ))}
-              {sidebarItems.length === 0 ? <div className="muted">No activity here yet.</div> : null}
-            </div>
-            <div className="sidebarComposer">
-              <textarea
-                className="sidebarComposerInput"
-                value={prompt}
-                placeholder={composerPlaceholder(chatMode)}
-                onChange={(event) => setPrompt(event.target.value)}
-                onKeyDown={(event) => {
-                  if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !submitBusy) void submitPrompt();
-                }}
-              />
-              <div className="segmentedControl sidebarActionBar">
-                {(["chat", "product", "technical", "security"] as ChatMode[]).map((mode) => (
-                  <button
-                    key={mode}
-                    type="button"
-                    className={
-                      "segmentedPill" +
-                      (allReviewMode ? (mode === "chat" ? "" : " active") : chatMode === mode ? " active" : "")
-                    }
-                    onClick={() => setChatMode(mode)}
-                  >
-                    {chatModeLabel(mode)}
-                  </button>
-                ))}
-              </div>
-              <div className="sidebarComposerFooter">
-                <button
-                  type="button"
-                  className="primary submitButton"
-                  onClick={() => void submitPrompt()}
-                  disabled={busy || submitBusy || !prompt.trim()}
-                >
-                  {submitBusy ? (
-                    <>
-                      <span className="spinner" aria-hidden="true" />
-                      <span>Submitting</span>
-                    </>
-                  ) : (
-                    "Submit"
-                  )}
-                </button>
-                <label className="sidebarCheckbox allReviewCheckbox">
-                  <input
-                    type="checkbox"
-                    checked={allReviewMode}
-                    onChange={(event) => setAllReviewMode(event.target.checked)}
-                  />
-                  <span>All</span>
-                </label>
-              </div>
-            </div>
-          </>
-        )}
-      </aside>
+      <ReviewRail
+        open={rightRailOpen}
+        cards={cards}
+        sidebarItems={sidebarItems}
+        cardFilter={cardFilter}
+        showAllCards={showAllCards}
+        showDismissedCards={showDismissedCards}
+        chatMode={chatMode}
+        allReviewMode={allReviewMode}
+        prompt={prompt}
+        busy={busy}
+        submitBusy={submitBusy}
+        onResizeStart={(event) => {
+          draggingRightRail.current = true;
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onOpen={() => setRightRailWidth(420)}
+        onCardFilterChange={setCardFilter}
+        onShowAllCardsChange={setShowAllCards}
+        onShowDismissedCardsChange={setShowDismissedCards}
+        onClearVisibleCards={() => void clearVisibleCards()}
+        onPromptChange={setPrompt}
+        onSubmitPrompt={() => void submitPrompt()}
+        onChatModeChange={setChatMode}
+        onAllReviewModeChange={setAllReviewMode}
+        onAcceptCard={openResolveCard}
+        onDismissCard={(card) => void setCardStatus(card, "rejected")}
+      />
 
       <input
         ref={filesInputRef}
@@ -1567,13 +1259,12 @@ export default function ProjectWorkspace() {
       ) : null}
 
       {planOpen ? (
-        <PlanModeModal
+        <PlanningModal
           busy={busy}
           planStage={planStage}
           selectedDocIds={planSelectedDocIds}
           sourceDocuments={sourceDocuments}
           planContext={planContext}
-          planMode={planMode}
           planQuestions={planQuestions}
           planStatus={planStatus}
           onClose={() => setPlanOpen(false)}
@@ -1582,7 +1273,6 @@ export default function ProjectWorkspace() {
           onContinue={() => void createPlanFromAnswers()}
           onToggleSource={togglePlanSource}
           onContextChange={setPlanContext}
-          onModeChange={setPlanMode}
           onQuestionsChange={setPlanQuestions}
         />
       ) : null}
@@ -1597,81 +1287,19 @@ export default function ProjectWorkspace() {
       ) : null}
 
       {reviewSessionOpen ? (
-        <Modal
-          title="Scrum Review Audio"
+        <ReviewSessionModal
+          reviewGenerating={reviewGenerating}
+          reviewSession={reviewSession}
+          reviewSessionCards={reviewSessionCards}
+          playbackState={reviewPlaybackState}
           onClose={() => {
             safeSpeechCancel();
             setReviewPlaybackState("idle");
             setReviewSessionOpen(false);
           }}
-          footer={
-            <>
-              <button
-                type="button"
-                className="secondary"
-                disabled={reviewGenerating || !reviewSession}
-                onClick={reviewPlaybackState === "playing" ? pauseReviewSession : playReviewSession}
-              >
-                {reviewPlaybackState === "playing" ? "Pause" : reviewPlaybackState === "paused" ? "Resume" : "Play"}
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                disabled={reviewGenerating || !reviewSession}
-                onClick={restartReviewSession}
-              >
-                Restart
-              </button>
-              <button
-                type="button"
-                className="primary"
-                onClick={() => {
-                  safeSpeechCancel();
-                  setReviewPlaybackState("idle");
-                  setReviewSessionOpen(false);
-                }}
-              >
-                Close
-              </button>
-            </>
-          }
-        >
-          {reviewGenerating ? (
-            <div className="reviewSessionGenerating" role="status" aria-live="polite">
-              <span className="spinner generationSpinner" aria-hidden="true" />
-              <div className="surfaceTitle">Generating scrum review</div>
-              <div className="surfaceCopy">Running Product, Technical, and Security passes before creating the audio script.</div>
-            </div>
-          ) : (
-            <div className="reviewSessionPanel">
-              <div className="reviewSessionTranscript">
-                {reviewSessionTurns(reviewSession).map((turn, index) => (
-                  <div key={`${turn.speaker}-${index}`} className="feedItem reviewTurn">
-                    <div className="reviewTurnHeader">
-                      <span className="reviewCardTitle">{turn.speaker}</span>
-                      <span className="feedMeta">{turn.segment}</span>
-                    </div>
-                    <div className="surfaceCopy">{turn.text}</div>
-                  </div>
-                ))}
-              </div>
-              <div className="surfaceTitle">Extracted cards</div>
-              <div className="reviewSessionCards">
-                {reviewSessionCards.map((card) => (
-                  <div key={card.id} className="reviewCard">
-                    <div className="reviewCardHeader">
-                      <span className={"reviewCardType cardTypeBadge cardTypeBadge-" + card.type}>{formatCardType(card.type)}</span>
-                      <span className="reviewCardStatus">{card.sourceAgent}</span>
-                    </div>
-                    <div className="reviewCardTitle">{card.title}</div>
-                    <div className="reviewCardBody">{card.body}</div>
-                  </div>
-                ))}
-                {reviewSessionCards.length === 0 ? <div className="muted">No cards were created for this session.</div> : null}
-              </div>
-            </div>
-          )}
-        </Modal>
+          onPlayPause={reviewPlaybackState === "playing" ? pauseReviewSession : playReviewSession}
+          onRestart={restartReviewSession}
+        />
       ) : null}
 
       {resolveCard ? (
@@ -2052,7 +1680,7 @@ export default function ProjectWorkspace() {
                     title="Plan mode"
                     aria-label="Plan mode"
                     disabled={sourceDocuments.length === 0}
-                    onClick={openPlanMode}
+                    onClick={openPlanning}
                   >
                     <LightningIcon />
                   </button>
@@ -2122,7 +1750,7 @@ export default function ProjectWorkspace() {
               title="Plan mode"
               aria-label="Plan mode"
               disabled={sourceDocuments.length === 0}
-              onClick={openPlanMode}
+              onClick={openPlanning}
             >
               <LightningIcon />
             </button>
@@ -2170,709 +1798,6 @@ export default function ProjectWorkspace() {
   }
 }
 
-function NavButton(props: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button type="button" className={"workspaceNavItem" + (props.active ? " active" : "")} onClick={props.onClick}>
-      {props.label}
-    </button>
-  );
-}
-
-type RenderedDiagramNode = {
-  id: string;
-  name: string;
-  responsibility: string;
-};
-
-type PlanPage = {
-  id: string;
-  title: string;
-  kind: "document" | "diagram";
-  content: string;
-  context?: string;
-};
-
-function PlanFolderView(props: {
-  pages: PlanPage[];
-  activePageIndex: number;
-  activePage: PlanPage | undefined;
-  onPageChange: (index: number) => void;
-  busy: boolean;
-  onSavePage: (page: PlanPage, content: string) => Promise<void>;
-}) {
-  const page = props.activePage || props.pages[0];
-  const [editingPageId, setEditingPageId] = React.useState<string | null>(null);
-  const [pageDraft, setPageDraft] = React.useState("");
-  const editing = page?.kind === "document" && editingPageId === page.id;
-
-  React.useEffect(() => {
-    setEditingPageId(null);
-    setPageDraft(page?.content || "");
-  }, [page?.id]);
-
-  if (!page) {
-    return <div className="emptyContextState">No plan pages found.</div>;
-  }
-
-  async function saveCurrentPage() {
-    if (!page || page.kind !== "document") return;
-    await props.onSavePage(page, pageDraft);
-    setEditingPageId(null);
-  }
-
-  return (
-    <div className="planFolder">
-      <div className="planPageRail" aria-label="Plan pages">
-        {props.pages.map((item, index) => (
-          <button
-            key={item.id}
-            type="button"
-            className={"planPageTab" + (index === props.activePageIndex ? " active" : "")}
-            onClick={() => props.onPageChange(index)}
-          >
-            <span className="documentType">{item.kind === "diagram" ? "DIAGRAM" : "PAGE"}</span>
-            <span className="documentName">{item.title}</span>
-          </button>
-        ))}
-      </div>
-      <div className="planPageViewport">
-        <div className="planPageHeader">
-          <div className="surfaceTitle">{page.title}</div>
-          <div className="planPageSubheader">
-            <div className="feedMeta">{page.kind === "diagram" ? "Mermaid diagram page" : "Plan document page"}</div>
-            {page.kind === "document" ? (
-              <div className="row">
-                <button
-                  type="button"
-                  className={"iconButton" + (editing ? " active" : "")}
-                  title="Edit page"
-                  aria-label="Edit page"
-                  disabled={props.busy}
-                  onClick={() => {
-                    setEditingPageId(page.id);
-                    setPageDraft(page.content);
-                  }}
-                >
-                  <PencilIcon />
-                </button>
-                <button
-                  type="button"
-                  className="iconButton iconButton-primary"
-                  title="Save page"
-                  aria-label="Save page"
-                  disabled={props.busy || !editing}
-                  onClick={() => void saveCurrentPage()}
-                >
-                  <SaveIcon />
-                </button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-        {page.kind === "diagram" ? (
-          <PlanDiagramCanvas mermaid={page.content} title={page.title} context={page.context || ""} />
-        ) : editing ? (
-          <textarea
-            className="documentEditor planPageEditor"
-            value={pageDraft}
-            onChange={(event) => setPageDraft(event.target.value)}
-            spellCheck={false}
-          />
-        ) : (
-          <MarkdownReader markdown={page.content} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function PlanDiagramCanvas(props: { mermaid: string; title: string; context: string }) {
-  const parsed = parsePlanMermaidDiagram(props.mermaid, props.context, props.title);
-  const root = parsed.nodes.find((node) => parsed.relationships.some((relationship) => relationship.sourceId === node.id));
-  const children = root
-    ? parsed.relationships
-        .filter((relationship) => relationship.sourceId === root.id)
-        .map((relationship) => parsed.nodes.find((node) => node.id === relationship.targetId))
-        .filter((node): node is PlanDiagramNode => Boolean(node))
-    : parsed.nodes.slice(1);
-
-  if (!root) {
-    return (
-      <div className="diagramEmpty">
-        <div className="surfaceTitle">No diagram data</div>
-        <div className="surfaceCopy">This plan diagram has no readable parent and child work items.</div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="planDiagramCanvas" aria-label="Plan relationship diagram">
-      <PlanWorkCard node={root} emphasis="parent" />
-      <div className="planDiagramFanout" aria-hidden="true" />
-      <div className="planDiagramChildren">
-        {children.map((child) => (
-          <div key={child.id} className="planDiagramChildRow">
-            <div className="planDiagramArrow" aria-hidden="true" />
-            <PlanWorkCard node={child} emphasis="child" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-type PlanDiagramNode = {
-  id: string;
-  title: string;
-  target: string;
-};
-
-function PlanWorkCard(props: { node: PlanDiagramNode; emphasis: "parent" | "child" }) {
-  return (
-    <div className={"planWorkCard " + props.emphasis}>
-      <div className="planWorkCardTitle">{props.node.title}</div>
-      <div className="planWorkCardTarget">{props.node.target || "Target: define the outcome of this block of work."}</div>
-    </div>
-  );
-}
-
-function MarkdownReader(props: { markdown: string }) {
-  return (
-    <div className="markdownReader">
-      {parseMarkdownBlocks(props.markdown).map((block, index) => {
-        if (block.type === "heading") {
-          const Heading = `h${Math.min(4, Math.max(2, block.level))}` as keyof JSX.IntrinsicElements;
-          return <Heading key={index}>{renderInlineMarkdown(block.text)}</Heading>;
-        }
-        if (block.type === "list") {
-          return (
-            <ul key={index}>
-              {block.items.map((item, itemIndex) => (
-                <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
-              ))}
-            </ul>
-          );
-        }
-        if (block.type === "code") {
-          return <pre key={index}><code>{block.text}</code></pre>;
-        }
-        return <p key={index}>{renderInlineMarkdown(block.text)}</p>;
-      })}
-    </div>
-  );
-}
-
-function renderInlineMarkdown(text: string) {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, index) => {
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return <strong key={index}>{part.slice(2, -2)}</strong>;
-    }
-    return <React.Fragment key={index}>{part}</React.Fragment>;
-  });
-}
-
-type MarkdownBlock =
-  | { type: "heading"; level: number; text: string }
-  | { type: "list"; items: string[] }
-  | { type: "code"; text: string }
-  | { type: "paragraph"; text: string };
-
-function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
-  const blocks: MarkdownBlock[] = [];
-  const lines = markdown.split(/\r?\n/);
-  let paragraph: string[] = [];
-  let list: string[] = [];
-  let code: string[] = [];
-  let inCode = false;
-
-  function flushParagraph() {
-    if (paragraph.length > 0) {
-      blocks.push({ type: "paragraph", text: paragraph.join(" ").trim() });
-      paragraph = [];
-    }
-  }
-
-  function flushList() {
-    if (list.length > 0) {
-      blocks.push({ type: "list", items: list });
-      list = [];
-    }
-  }
-
-  for (const rawLine of lines) {
-    const line = rawLine.trimEnd();
-    const trimmed = line.trim();
-
-    if (trimmed.startsWith("```")) {
-      if (inCode) {
-        blocks.push({ type: "code", text: code.join("\n") });
-        code = [];
-        inCode = false;
-      } else {
-        flushParagraph();
-        flushList();
-        inCode = true;
-      }
-      continue;
-    }
-
-    if (inCode) {
-      code.push(rawLine);
-      continue;
-    }
-
-    if (!trimmed) {
-      flushParagraph();
-      flushList();
-      continue;
-    }
-
-    const heading = /^(#{1,6})\s+(.+)$/.exec(trimmed);
-    if (heading) {
-      flushParagraph();
-      flushList();
-      blocks.push({ type: "heading", level: heading[1].length, text: heading[2].trim() });
-      continue;
-    }
-
-    const listItem = /^[-*]\s+(?:\[[ xX]\]\s*)?(.+)$/.exec(trimmed);
-    if (listItem) {
-      flushParagraph();
-      list.push(listItem[1].trim());
-      continue;
-    }
-
-    paragraph.push(trimmed);
-  }
-
-  flushParagraph();
-  flushList();
-  if (code.length > 0) blocks.push({ type: "code", text: code.join("\n") });
-  return blocks.length > 0 ? blocks : [{ type: "paragraph", text: "No content yet." }];
-}
-
-function DiagramCanvas(props: { entities: DiagramEntity[]; mermaid: string }) {
-  const parsed = parseMermaidDiagram(props.mermaid);
-  const nodes = parsed.nodes.length > 0
-    ? parsed.nodes
-    : props.entities.map((entity) => ({
-        id: entity.id,
-        name: entity.name,
-        responsibility: entity.responsibility,
-      }));
-  const relationships = parsed.nodes.length > 0
-    ? parsed.relationships
-    : props.entities.flatMap((entity) =>
-        entity.collaborators.map((collaboratorId) => ({
-          sourceId: entity.id,
-          targetId: collaboratorId,
-        })),
-      );
-
-  if (nodes.length === 0) {
-    return (
-      <div className="diagramEmpty">
-        <div className="surfaceTitle">No cards yet</div>
-        <div className="surfaceCopy">Add a card to create the first diagram entity.</div>
-      </div>
-    );
-  }
-
-  const nodeById = new Map(nodes.map((node) => [node.id, node]));
-  const renderedRelationships = relationships
-    .map((relationship) => ({
-      source: nodeById.get(relationship.sourceId),
-      target: nodeById.get(relationship.targetId),
-    }))
-    .filter((relationship): relationship is { source: RenderedDiagramNode; target: RenderedDiagramNode } =>
-      Boolean(relationship.source && relationship.target),
-    );
-  const connectedIds = new Set(renderedRelationships.flatMap((relationship) => [relationship.source.id, relationship.target.id]));
-  const standalone = nodes.filter((node) => !connectedIds.has(node.id));
-
-  return (
-    <div className="diagramCanvas" aria-label="Rendered Mermaid diagram">
-      {renderedRelationships.map((relationship) => (
-        <div key={`${relationship.source.id}-${relationship.target.id}`} className="diagramRelationship">
-          <DiagramNode node={relationship.source} />
-          <div className="diagramArrow" aria-hidden="true" />
-          <DiagramNode node={relationship.target} />
-        </div>
-      ))}
-      {standalone.length > 0 ? (
-        <div className="diagramStandalone">
-          {standalone.map((node) => (
-            <DiagramNode key={node.id} node={node} />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function DiagramNode(props: { node: RenderedDiagramNode }) {
-  return (
-    <div className="diagramNode">
-      <div className="diagramNodeName">{props.node.name}</div>
-      <div className="diagramNodeResponsibility">
-        Responsibility: {props.node.responsibility || "Unassigned"}
-      </div>
-    </div>
-  );
-}
-
-function parseMermaidDiagram(mermaid: string): {
-  nodes: RenderedDiagramNode[];
-  relationships: Array<{ sourceId: string; targetId: string }>;
-} {
-  const nodes = new Map<string, RenderedDiagramNode>();
-  const relationships: Array<{ sourceId: string; targetId: string }> = [];
-
-  for (const line of mermaid.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("flowchart") || trimmed.startsWith("graph")) continue;
-
-    const relationshipMatch = /^([A-Za-z0-9_:-]+)\s*-->\s*([A-Za-z0-9_:-]+)/.exec(trimmed);
-    if (relationshipMatch) {
-      relationships.push({ sourceId: relationshipMatch[1], targetId: relationshipMatch[2] });
-      continue;
-    }
-
-    const nodeMatch = /^([A-Za-z0-9_:-]+)\s*\[\s*"([^"]*)"\s*\]/.exec(trimmed);
-    if (nodeMatch) {
-      const label = nodeMatch[2].replace(/<br\s*\/?>/gi, "\n").replace(/\\"/g, '"');
-      const lines = label.split(/\n+/).map((item) => item.trim()).filter(Boolean);
-      const responsibilityLine = lines.find((item) => item.toLowerCase().startsWith("responsibility:"));
-      nodes.set(nodeMatch[1], {
-        id: nodeMatch[1],
-        name: lines[0] || nodeMatch[1],
-        responsibility: responsibilityLine?.replace(/^responsibility:\s*/i, "") || "",
-      });
-    }
-  }
-
-  for (const relationship of relationships) {
-    if (!nodes.has(relationship.sourceId)) {
-      nodes.set(relationship.sourceId, { id: relationship.sourceId, name: relationship.sourceId, responsibility: "" });
-    }
-    if (!nodes.has(relationship.targetId)) {
-      nodes.set(relationship.targetId, { id: relationship.targetId, name: relationship.targetId, responsibility: "" });
-    }
-  }
-
-  return { nodes: [...nodes.values()], relationships };
-}
-
-function parsePlanMermaidDiagram(mermaid: string, context: string, diagramTitle: string): {
-  nodes: PlanDiagramNode[];
-  relationships: Array<{ sourceId: string; targetId: string }>;
-} {
-  const nodes = new Map<string, PlanDiagramNode>();
-  const relationships: Array<{ sourceId: string; targetId: string }> = [];
-  const inferred = inferPlanDiagramLabels(context, diagramTitle);
-
-  for (const line of mermaid.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("flowchart") || trimmed.startsWith("graph")) continue;
-
-    for (const nodeMatch of trimmed.matchAll(/([A-Za-z0-9_:-]+)\s*\[\s*"?([^"\]]+)"?\s*\]/g)) {
-      nodes.set(nodeMatch[1], {
-        id: nodeMatch[1],
-        ...parsePlanNodeLabel(nodeMatch[2], nodeMatch[1]),
-      });
-    }
-
-    const relationshipMatch = /^([A-Za-z0-9_:-]+)(?:\s*\[[^\]]+\])?\s*-->(?:\|[^|]+\|)?\s*([A-Za-z0-9_:-]+)/.exec(trimmed);
-    if (relationshipMatch) {
-      relationships.push({ sourceId: relationshipMatch[1], targetId: relationshipMatch[2] });
-      continue;
-    }
-  }
-
-  const sourceIds = new Set(relationships.map((relationship) => relationship.sourceId));
-  const targetIds = new Set(relationships.map((relationship) => relationship.targetId));
-  const rootId = [...sourceIds].find((id) => !targetIds.has(id)) || relationships[0]?.sourceId || "";
-  const childIds = relationships.filter((relationship) => relationship.sourceId === rootId).map((relationship) => relationship.targetId);
-
-  for (const relationship of relationships) {
-    if (!nodes.has(relationship.sourceId)) {
-      nodes.set(relationship.sourceId, {
-        id: relationship.sourceId,
-        ...labelForPlanNode(relationship.sourceId, inferred, rootId, childIds),
-      });
-    }
-    if (!nodes.has(relationship.targetId)) {
-      nodes.set(relationship.targetId, {
-        id: relationship.targetId,
-        ...labelForPlanNode(relationship.targetId, inferred, rootId, childIds),
-      });
-    }
-  }
-
-  for (const node of nodes.values()) {
-    if (isGenericPlanNode(node)) {
-      const label = labelForPlanNode(node.id, inferred, rootId, childIds);
-      node.title = label.title;
-      node.target = label.target;
-    }
-  }
-
-  if (relationships.length === 0) {
-    return buildFallbackPlanDiagram(context, diagramTitle);
-  }
-
-  return { nodes: [...nodes.values()], relationships };
-}
-
-function buildFallbackPlanDiagram(context: string, diagramTitle: string): {
-  nodes: PlanDiagramNode[];
-  relationships: Array<{ sourceId: string; targetId: string }>;
-} {
-  const inferred = inferPlanDiagramLabels(context, diagramTitle);
-  const cleanedTitle = normalizePlanTitle(inferred.cleanedTitle);
-
-  if (/initiative relationship/i.test(diagramTitle)) {
-    const nodes = inferred.initiatives.slice(0, 4).map((item, index) => ({
-      id: `I${index + 1}`,
-      ...planItemLabel(item),
-    }));
-    return {
-      nodes,
-      relationships: nodes.slice(1).map((node, index) => ({
-        sourceId: index === 0 ? nodes[0].id : nodes[index].id,
-        targetId: node.id,
-      })),
-    };
-  }
-
-  const initiative = inferred.initiatives.find((item) => normalizePlanTitle(item.title) === cleanedTitle)
-    || inferred.initiatives.find((item) => cleanedTitle.includes(normalizePlanTitle(item.title)) || normalizePlanTitle(item.title).includes(cleanedTitle));
-  if (initiative) {
-    const children = inferred.epics.filter((item) => item.number.startsWith(`${initiative.number}.`));
-    const nodes = [
-      { id: "parent", ...planItemLabel(initiative) },
-      ...children.map((item, index) => ({ id: `child${index + 1}`, ...planItemLabel(item) })),
-    ];
-    return {
-      nodes,
-      relationships: nodes.slice(1).map((node) => ({ sourceId: "parent", targetId: node.id })),
-    };
-  }
-
-  const epic = inferred.epics.find((item) => normalizePlanTitle(item.title) === cleanedTitle)
-    || inferred.epics.find((item) => cleanedTitle.includes(normalizePlanTitle(item.title)) || normalizePlanTitle(item.title).includes(cleanedTitle));
-  if (epic) {
-    const children = inferred.tickets.filter((item) => item.number.startsWith(`${epic.number}.`));
-    const nodes = [
-      { id: "parent", ...planItemLabel(epic) },
-      ...children.map((item, index) => ({ id: `child${index + 1}`, ...planItemLabel(item) })),
-    ];
-    return {
-      nodes,
-      relationships: nodes.slice(1).map((node) => ({ sourceId: "parent", targetId: node.id })),
-    };
-  }
-
-  return { nodes: [], relationships: [] };
-}
-
-function inferPlanDiagramLabels(context: string, diagramTitle: string) {
-  const cleanedTitle = diagramTitle.replace(/\s+Diagram$/i, "").trim();
-  const initiatives = extractNumberedPlanItems(context, "Initiative");
-  const epics = extractNumberedPlanItems(context, "Epic");
-  const tickets = extractNumberedPlanItems(context, "Ticket");
-  const matchingInitiative = initiatives.find((item) => samePlanTitle(item.title, cleanedTitle));
-  const matchingEpic = epics.find((item) => samePlanTitle(item.title, cleanedTitle));
-
-  return { cleanedTitle, initiatives, epics, tickets, matchingInitiative, matchingEpic };
-}
-
-function labelForPlanNode(
-  id: string,
-  inferred: ReturnType<typeof inferPlanDiagramLabels>,
-  rootId = "",
-  childIds: string[] = [],
-): { title: string; target: string } {
-  if (id === rootId) {
-    const rootItem = inferred.matchingEpic || inferred.matchingInitiative || inferred.initiatives[0];
-    if (rootItem) return planItemLabel(rootItem);
-  }
-
-  const childIndex = childIds.indexOf(id);
-  if (childIndex >= 0) {
-    if (inferred.matchingEpic) {
-      const scopedTickets = inferred.tickets.filter((item) => item.number.startsWith(`${inferred.matchingEpic?.number}.`));
-      const item = scopedTickets[childIndex] || inferred.tickets[childIndex];
-      if (item) return planItemLabel(item);
-    }
-    if (inferred.matchingInitiative) {
-      const scopedEpics = inferred.epics.filter((item) => item.number.startsWith(`${inferred.matchingInitiative?.number}.`));
-      const item = scopedEpics[childIndex] || inferred.epics[childIndex];
-      if (item) return planItemLabel(item);
-    }
-    const overviewItem = inferred.initiatives[childIndex + (rootId ? 1 : 0)] || inferred.initiatives[childIndex];
-    if (overviewItem) return planItemLabel(overviewItem);
-  }
-
-  const initiativeMatch = /^A?I?(\d+)$/i.exec(id);
-  if (initiativeMatch) {
-    const item = inferred.initiatives[Number(initiativeMatch[1]) - 1] || inferred.matchingInitiative;
-    return item ? planItemLabel(item) : { title: inferred.cleanedTitle || humanizeMermaidId(id), target: "" };
-  }
-
-  const epicMatch = /^E(\d+)$|^I?(\d+)E(\d+)$/i.exec(id);
-  if (epicMatch) {
-    const epicNumber = Number(epicMatch[1] || epicMatch[3]);
-    const matchingInitiative = inferred.matchingInitiative;
-    const scopedEpics = matchingInitiative
-      ? inferred.epics.filter((item) => item.number.startsWith(`${matchingInitiative.number}.`))
-      : inferred.epics;
-    const item = scopedEpics[epicNumber - 1] || inferred.epics[epicNumber - 1];
-    return item ? planItemLabel(item) : { title: humanizeMermaidId(id), target: "" };
-  }
-
-  const ticketMatch = /^T(\d+)$|^I?(\d+)E(\d+)T(\d+)$/i.exec(id);
-  if (ticketMatch) {
-    const ticketNumber = Number(ticketMatch[1] || ticketMatch[4]);
-    const matchingEpic = inferred.matchingEpic;
-    const scopedTickets = matchingEpic
-      ? inferred.tickets.filter((item) => item.number.startsWith(`${matchingEpic.number}.`))
-      : inferred.tickets;
-    const item = scopedTickets[ticketNumber - 1] || inferred.tickets[ticketNumber - 1];
-    return item ? planItemLabel(item) : { title: humanizeMermaidId(id), target: "" };
-  }
-
-  return { title: humanizeMermaidId(id), target: "" };
-}
-
-function isGenericPlanNode(node: PlanDiagramNode) {
-  return /^[A-Z]\d*$/i.test(node.title.trim()) || !node.target.trim();
-}
-
-function extractNumberedPlanItems(context: string, kind: "Initiative" | "Epic" | "Ticket") {
-  const explicitPattern = new RegExp(`^\\s*(?:[-*]\\s*)?(?:#{3,5}\\s*)?(?:\\*\\*)?${kind}\\s+([\\d.]+)\\s*(?::|-|\\.|\\))\\s*(.+?)(?:\\*\\*)?\\s*$`, "gim");
-  const matches = [...context.matchAll(explicitPattern)];
-  if (matches.length === 0) {
-    const section = sectionForPlanKind(context, kind);
-    const numberedPattern = /^#{3,5}\s+([\d.]+)\s*(?::|-|\.|\))\s*(.+)$/gim;
-    return [...section.matchAll(numberedPattern)]
-      .filter((match) => numberMatchesPlanKind(match[1], kind))
-      .map((match) => extractedNumberedPlanItem(section, match));
-  }
-
-  return matches.map((match) => extractedNumberedPlanItem(context, match));
-}
-
-function extractedNumberedPlanItem(context: string, match: RegExpMatchArray) {
-    const start = match.index || 0;
-    const nextHeading = context.slice(start + match[0].length).search(/^#{3,5}\s+|\n\s*(?:[-*]\s*)?(?:\*\*)?(?:Initiative|Epic|Ticket)\s+[\d.]+\s*(?::|-|\.|\))/m);
-    const end = nextHeading === -1 ? context.length : start + match[0].length + nextHeading;
-    const block = context.slice(start, end);
-    const target = /(?:Goal|Target):\s*(.+)/i.exec(block)?.[1]?.trim() || "";
-    return {
-      number: match[1],
-      title: match[2].trim(),
-      target,
-    };
-}
-
-function sectionForPlanKind(markdown: string, kind: "Initiative" | "Epic" | "Ticket") {
-  const sectionTitle = kind === "Initiative" ? "Initiatives" : `${kind}s`;
-  const pattern = new RegExp(`^##\\s+${sectionTitle}\\s*$`, "im");
-  const match = pattern.exec(markdown);
-  if (!match) return markdown;
-  const start = match.index + match[0].length;
-  const next = markdown.slice(start).search(/^##\s+/m);
-  return markdown.slice(start, next === -1 ? markdown.length : start + next);
-}
-
-function numberMatchesPlanKind(number: string, kind: "Initiative" | "Epic" | "Ticket") {
-  const depth = number.split(".").filter(Boolean).length;
-  if (kind === "Initiative") return depth === 1;
-  if (kind === "Epic") return depth === 2;
-  return depth >= 3;
-}
-
-function planItemLabel(item: { title: string; target: string }) {
-  return {
-    title: item.title,
-    target: item.target || "Define the outcome of this block of work.",
-  };
-}
-
-function samePlanTitle(left: string, right: string) {
-  return normalizePlanTitle(left) === normalizePlanTitle(right);
-}
-
-function normalizePlanTitle(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-function parsePlanNodeLabel(rawLabel: string, fallback: string) {
-  const label = rawLabel.replace(/<br\s*\/?>/gi, "\n").replace(/\\"/g, '"');
-  const parts = label.split(/\n+/).map((item) => item.trim()).filter(Boolean);
-  const targetLine = parts.find((part) => /^target:/i.test(part));
-  return {
-    title: parts[0] || humanizeMermaidId(fallback),
-    target: targetLine?.replace(/^target:\s*/i, "") || parts.slice(1).join(" ") || "",
-  };
-}
-
-function humanizeMermaidId(value: string) {
-  return value.replace(/^I(\d+)E?(\d+)?T?(\d+)?$/i, (_match, initiative, epic, ticket) => {
-    if (ticket) return `Ticket ${initiative}.${epic}.${ticket}`;
-    if (epic) return `Epic ${initiative}.${epic}`;
-    return `Initiative ${initiative}`;
-  });
-}
-
-function FocusFrame(props: {
-  title: string;
-  description: string;
-  actions?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="focusFrame">
-      <div className="focusFrameHeader">
-        <div>
-          <div className="focusTitle">{props.title}</div>
-          <div className="focusDescription">{props.description}</div>
-        </div>
-        {props.actions ? <div className="focusActions">{props.actions}</div> : null}
-      </div>
-      <div className="focusFrameBody">{props.children}</div>
-    </div>
-  );
-}
-
-function ReferenceDropZone(props: { onFiles: (files: FileList | null) => void; onPickFiles: () => void }) {
-  const [dragging, setDragging] = React.useState(false);
-
-  return (
-    <div
-      className={"referenceDropZone" + (dragging ? " active" : "")}
-      onDragOver={(event) => {
-        event.preventDefault();
-        setDragging(true);
-      }}
-      onDragLeave={() => setDragging(false)}
-      onDrop={(event) => {
-        event.preventDefault();
-        setDragging(false);
-        props.onFiles(event.dataTransfer.files);
-      }}
-    >
-      <div className="surfaceTitle">Drop text files here</div>
-      <div className="surfaceCopy">Supports markdown, plain text, code, config, and other readable text files.</div>
-      <button type="button" className="secondary" onClick={props.onPickFiles}>
-        Pick Files
-      </button>
-    </div>
-  );
-}
-
 function parseRoute(pathname: string): { view: ViewKey; documentId: string | null } {
   const parts = pathname.split("/").filter(Boolean);
   const view = parts[2];
@@ -2890,107 +1815,6 @@ function formatTime(value: string) {
 function isReferenceFile(name: string) {
   const lowered = name.toLowerCase();
   return acceptedReferenceTypes.some((suffix) => lowered.endsWith(suffix));
-}
-
-function buildPlanPages(markdown: string): PlanPage[] {
-  const pages: PlanPage[] = [];
-  const majorSections = splitPlanMajorSections(markdown);
-
-  for (const section of majorSections) {
-    const parts = section.content.split(/```mermaid\s*([\s\S]*?)```/gi);
-    const textParts: string[] = [];
-    const diagramPages: PlanPage[] = [];
-
-    for (let index = 0; index < parts.length; index += 1) {
-      if (index % 2 === 0) {
-        const text = parts[index].trim();
-        if (text) textParts.push(text);
-        continue;
-      }
-
-      const mermaid = parts[index].trim();
-      if (mermaid) {
-        diagramPages.push({
-          id: `${section.id}-diagram-${index}`,
-          title: section.title === "Plan Summary"
-            ? "Initiative Relationship Diagram"
-            : `${nearestPlanSubject(parts[index - 1] || section.title)} Diagram`,
-          kind: "diagram",
-          content: mermaid,
-          context: `${section.content}\n\n${markdown}`,
-        });
-      }
-    }
-
-    const text = textParts.join("\n\n").trim();
-    if (text) {
-      pages.push({
-        id: section.id,
-        title: section.title,
-        kind: "document",
-        content: text,
-      });
-    }
-    pages.push(...diagramPages);
-  }
-
-  return pages.length > 0
-    ? pages
-    : [{ id: "plan", title: "Plan", kind: "document", content: markdown.trim() || "No plan content yet." }];
-}
-
-function replacePlanPageMarkdown(markdown: string, page: PlanPage, nextContent: string) {
-  if (page.kind !== "document") return markdown;
-  const sections = splitPlanMajorSections(markdown);
-  const section = sections.find((item) => item.title === page.title);
-  if (!section) return markdown;
-
-  const diagrams = [...section.content.matchAll(/```mermaid\s*[\s\S]*?```/gi)].map((match) => match[0].trim());
-  const cleanedContent = sanitizePlanPageDraft(nextContent, page.title);
-  const nextSection = [cleanedContent, ...diagrams].filter(Boolean).join("\n\n").trim();
-  return `${markdown.slice(0, section.start)}${nextSection}${markdown.slice(section.end)}`;
-}
-
-function sanitizePlanPageDraft(value: string, title: string) {
-  const withoutDiagrams = value.replace(/```mermaid\s*[\s\S]*?```/gi, "").trim();
-  if (new RegExp(`^##\\s+${escapeRegExp(title)}\\s*$`, "im").test(withoutDiagrams)) {
-    return withoutDiagrams;
-  }
-  return `## ${title}\n${withoutDiagrams}`.trim();
-}
-
-function splitPlanMajorSections(markdown: string) {
-  const matches = [...markdown.matchAll(/^##\s+(.+)$/gm)];
-  if (matches.length === 0) {
-    return [{ id: "plan", title: firstMarkdownHeading(markdown) || "Plan", start: 0, end: markdown.length, content: markdown }];
-  }
-
-  return matches.map((match, index) => {
-    const start = match.index || 0;
-    const next = matches[index + 1]?.index ?? markdown.length;
-    const title = match[1].trim();
-    return {
-      id: createStablePageId(title, index),
-      title,
-      start,
-      end: next,
-      content: markdown.slice(start, next).trim(),
-    };
-  });
-}
-
-function firstMarkdownHeading(markdown: string) {
-  return /^#\s+(.+)$/m.exec(markdown)?.[1]?.trim() || null;
-}
-
-function nearestPlanSubject(text: string) {
-  const headings = [...text.matchAll(/^#{3,4}\s+(.+)$/gm)];
-  const heading = headings[headings.length - 1]?.[1]?.trim();
-  return heading ? heading.replace(/^(Initiative|Epic|Ticket)\s+[\d.]+:\s*/i, "") : "Plan";
-}
-
-function createStablePageId(title: string, index: number) {
-  return `${index}-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "page"}`;
 }
 
 function formatPlanTimecode(date: Date) {
@@ -3023,21 +1847,8 @@ function uniqueIds(ids: string[]) {
   return ids.filter((id, index) => id && ids.indexOf(id) === index);
 }
 
-function chatModeLabel(mode: ChatMode) {
-  if (mode === "chat") return "Chat";
-  if (mode === "product") return "Product";
-  if (mode === "technical") return "Technical";
-  return "Security";
-}
-
-function effectiveChatMode(mode: ChatMode, allReview: boolean): ChatMode | "everything" {
-  return allReview ? "everything" : mode;
-}
-
-function chatInfoCardTitle(mode: ChatPersonaMode) {
-  if (mode === "product") return "Product response";
-  if (mode === "technical") return "Technical response";
-  return "Assistant response";
+function effectiveChatMode(mode: ChatMode, allReview: boolean): ReviewTarget {
+  return allReview ? "allPersonas" : mode;
 }
 
 function resolveKindLabel(kind: ResolveKind) {
@@ -3091,433 +1902,17 @@ function firstVisibleCardFilter(cards: NewAgentCardInput[]): CardFilter {
   return cards.some((card) => card.type === "info") ? "info" : cards[0]?.type || "info";
 }
 
-function ensureMinimumReviewCards(
-  cards: NewAgentCardInput[],
-  fallbackCards: NewAgentCardInput[],
-  minimum: number,
-): NewAgentCardInput[] {
-  const combined = dedupeCards([...cards, ...fallbackCards, ...syntheticReviewCards(cards, fallbackCards)]);
-  if (combined.length >= minimum) return combined;
-  const toppedUp = [...combined];
-  while (toppedUp.length < minimum) {
-    toppedUp.push(supplementalReviewCard(toppedUp.length + 1, toppedUp[0]?.sourceAgent || "ARM Review"));
-  }
-  return dedupeCards(toppedUp).slice(0, minimum);
-}
-
-function syntheticReviewCards(primary: NewAgentCardInput[], fallback: NewAgentCardInput[]): NewAgentCardInput[] {
-  const cards = [...primary, ...fallback];
-  const sourceAgent = cards[0]?.sourceAgent || "ARM Review";
-  const missing: NewAgentCardInput[] = [];
-
-  if (!cards.some((card) => card.type === "info")) {
-    missing.push({
-      type: "info",
-      title: "Review orientation",
-      body: "This review should be read as decision support for the active document, not as an automatic approval to build.",
-      proposedUpdate: null,
-      targetSection: "Current direction",
-      sourceAgent,
-    });
-  }
-  if (!cards.some((card) => card.type === "warning")) {
-    missing.push({
-      type: "warning",
-      title: "Unvalidated assumption",
-      body: "The current direction still depends on an assumption that should be made explicit before the next build or planning step.",
-      proposedUpdate: "Add the riskiest assumption and the cheapest way to test it.",
-      targetSection: "Risks",
-      sourceAgent,
-    });
-  }
-  if (!cards.some((card) => card.type === "open_question")) {
-    missing.push({
-      type: "open_question",
-      title: "Decision criteria",
-      body: "The document should name what evidence would make this direction a yes, no, or revise decision.",
-      proposedUpdate: "Add decision criteria for continuing, changing, or stopping this work.",
-      targetSection: "Open questions",
-      sourceAgent,
-    });
-  }
-  if (!cards.some((card) => card.type === "action")) {
-    missing.push({
-      type: "action",
-      title: "Next validation step",
-      body: "Pick one small action that reduces uncertainty before the scope expands.",
-      proposedUpdate: "Add one concrete next step with an owner or completion condition.",
-      targetSection: "Next actions",
-      sourceAgent,
-    });
-  }
-
-  return missing;
-}
-
-function fallbackInfoCard(prompt: string): NewAgentCardInput {
-  return {
-    type: "info",
-    title: "Combined review",
-    body: `Review requested: ${prompt}`,
-    proposedUpdate: null,
-    targetSection: "Current direction",
-    sourceAgent: "ARM Assistant",
-  };
-}
-
-function normalizeGeneratedCards(cards: NewAgentCardInput[], mode: ChatPersonaMode): NewAgentCardInput[] {
-  return dedupeCards(cards.flatMap((card) => splitStructuredCardBody(card, mode)));
-}
-
-function splitStructuredCardBody(card: NewAgentCardInput, mode: ChatPersonaMode): NewAgentCardInput[] {
-  const sections = extractStructuredCardSections(card.body);
-  if (sections.length <= 1) return [card];
-
-  return sections.map((section, index) => ({
-    ...card,
-    type: inferCardTypeFromText(section.text, card.type),
-    title: section.title || `${card.title} ${index + 1}`,
-    body: section.text,
-    proposedUpdate: card.proposedUpdate,
-    targetSection: card.targetSection,
-    sourceAgent: card.sourceAgent || sourceAgentLabel(mode),
-  }));
-}
-
-function extractStructuredCardSections(text: string) {
-  const normalized = text.replace(/\r/g, "").trim();
-  const pattern = /(?:^|\n|\s-{3,}\s*)\s*(?:#{1,6}\s*)?(?:\*\*)?\s*CARD\s+\d+\s*:\s*([^*\n]+?)(?:\*\*)?\s*/gi;
-  const matches = [...normalized.matchAll(pattern)];
-  if (matches.length <= 1) return [];
-
-  return matches.map((match, index) => {
-    const start = (match.index || 0) + match[0].length;
-    const end = matches[index + 1]?.index ?? normalized.length;
-    return {
-      title: cleanInlineMarkdown(match[1]),
-      text: cleanCardBody(normalized.slice(start, end)),
-    };
-  }).filter((section) => section.text.length > 0 || section.title.length > 0);
-}
-
-function cleanCardBody(value: string) {
-  return cleanInlineMarkdown(
-    value
-      .replace(/^\s*[-–—]{3,}\s*/gm, "")
-      .replace(/\b(Rejection reason|User consequence|Impact|Suggestion|Action|Question|Risk):/gi, "$1:")
-      .trim(),
-  );
-}
-
-function cleanInlineMarkdown(value: string) {
-  return value
-    .replace(/\*\*/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function inferCardTypeFromText(text: string, fallback: NewAgentCardInput["type"]): NewAgentCardInput["type"] {
-  const lower = text.toLowerCase();
-  if (/\b(rejection reason|risk|warning|red flag|concern|danger)\b/.test(lower)) return "warning";
-  if (/\b(question|unclear|unknown|missing)\b/.test(lower)) return "open_question";
-  if (/\b(action|next step|recommendation|suggestion)\b/.test(lower)) return "action";
-  return fallback;
-}
-
-function cardsFromSettled(
-  result: PromiseSettledResult<NewAgentCardInput[]>,
-  fallbackCards: NewAgentCardInput[],
-): NewAgentCardInput[] {
-  if (result.status === "fulfilled" && result.value.length > 0) {
-    return result.value.slice(0, 4);
-  }
-  return fallbackCards.slice(0, 3);
-}
-
-function safeSpeechCancel() {
-  try {
-    window.speechSynthesis?.cancel();
-  } catch {
-    // WebView speech support is optional; transcript and cards are the durable artifact.
-  }
-}
-
-function safeSpeechPause() {
-  try {
-    window.speechSynthesis?.pause();
-  } catch {
-    // Playback failure should not affect saved review output.
-  }
-}
-
-function safeSpeechResume() {
-  try {
-    window.speechSynthesis?.resume();
-  } catch {
-    // Playback failure should not affect saved review output.
-  }
-}
-
-function safeSpeechSpeak(utterance: SpeechSynthesisUtterance) {
-  try {
-    if (!window.speechSynthesis) return false;
-    window.speechSynthesis.speak(utterance);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function buildScrumReviewArtifact(
-  document: ProjectDocument,
-  productCards: NewAgentCardInput[],
-  technicalCards: NewAgentCardInput[],
-  securityCards: NewAgentCardInput[],
-  createdCards: AgentCard[],
-) {
-  const product = productCards.slice(0, 2);
-  const technical = technicalCards.slice(0, 2);
-  const security = securityCards.slice(0, 2);
-  const rawTurns: ReviewDialogueTurn[] = [
-    {
-      speaker: "Host",
-      segment: "Intro",
-      text: limitSpeechText(`Today we are reviewing ${document.name}. ARM will keep this to structured Product, Technical, and Security findings.`),
-    },
-    {
-      speaker: "Product",
-      segment: "Product pass",
-      text: summarizeCardsForSpeech(product, "Product found no major business, user, or scope blocker."),
-    },
-    {
-      speaker: "Technical",
-      segment: "Technical pass",
-      text: summarizeCardsForSpeech(technical, "Technical found no major architecture, implementation, or operational blocker."),
-    },
-    {
-      speaker: "Security",
-      segment: "Security pass",
-      text: summarizeCardsForSpeech(security, "Security found no major privacy, compliance, abuse, or retrieval-risk blocker."),
-    },
-    {
-      speaker: "Host",
-      segment: "Conflict/tradeoff section",
-      text: buildTradeoffSpeech(product, technical, security),
-    },
-    {
-      speaker: "Host",
-      segment: "Final recommendations",
-      text: buildRecommendationSpeech(createdCards),
-    },
-    {
-      speaker: "Host",
-      segment: "Card extraction summary",
-      text: limitSpeechText(
-        `ARM created ${createdCards.length} review cards from the structured persona findings. The transcript is playback only; the cards remain the source of truth.`,
-      ),
-    },
-  ];
-  const turns = rawTurns.filter((turn) => turn.text.trim()).slice(0, 10);
-
-  return {
-    title: `Scrum Review: ${document.name}`,
-    turns,
-    transcript: renderReviewTranscript(turns, createdCards),
-  };
-}
-
-function summarizeCardsForSpeech(cards: NewAgentCardInput[], fallback: string) {
-  if (cards.length === 0) return fallback;
-  return limitSpeechText(cards.map(cardToReviewLine).join(" "));
-}
-
-function cardToReviewLine(card: NewAgentCardInput) {
-  const prefix = card.type === "warning" ? "Risk" : card.type === "open_question" ? "Question" : card.type === "action" ? "Action" : "Signal";
-  return `${prefix}: ${card.title}. ${card.body}`;
-}
-
-function buildTradeoffSpeech(
-  productCards: NewAgentCardInput[],
-  technicalCards: NewAgentCardInput[],
-  securityCards: NewAgentCardInput[],
-) {
-  const productRisk = productCards.find((card) => card.type === "warning" || card.type === "open_question");
-  const technicalRisk = technicalCards.find((card) => card.type === "warning" || card.type === "open_question");
-  const securityRisk = securityCards.find((card) => card.type === "warning" || card.type === "open_question");
-  const signals = [productRisk, technicalRisk, securityRisk].filter((card): card is NewAgentCardInput => Boolean(card));
-  if (signals.length === 0) {
-    return "The review did not produce a clear conflict. The next step is to execute the extracted cards in priority order.";
-  }
-  return limitSpeechText(`The main tradeoff is between ${signals.map((card) => card.title).join(", ")}. Resolve those before treating the document as ready.`);
-}
-
-function buildRecommendationSpeech(cards: AgentCard[]) {
-  const actions = cards.filter((card) => card.type === "action").slice(0, 2);
-  if (actions.length > 0) {
-    return limitSpeechText(`Start with ${actions.map((card) => card.title).join(" and ")}. Those actions give the team the clearest next review checkpoint.`);
-  }
-  const firstCards = cards.slice(0, 2);
-  if (firstCards.length > 0) {
-    return limitSpeechText(`Start by resolving ${firstCards.map((card) => card.title).join(" and ")}. Those are the clearest review outputs.`);
-  }
-  return "No final recommendation was created because no structured cards were available.";
-}
-
-function renderReviewTranscript(turns: ReviewDialogueTurn[], cards: AgentCard[]) {
-  const transcript = turns.map((turn) => `## ${turn.segment}\n**${turn.speaker}:** ${turn.text}`).join("\n\n");
-  const cardSummary = cards.map((card) => `- ${formatCardType(card.type)}: ${card.title}`).join("\n");
-  return `${transcript}\n\n## Extracted Cards\n${cardSummary || "- No cards created."}\n`;
-}
-
-function reviewSessionTurns(session: ReviewSession | null): ReviewDialogueTurn[] {
-  if (!session) return [];
-  try {
-    const parsed = JSON.parse(session.dialogueTurns);
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((turn): turn is ReviewDialogueTurn => {
-        return Boolean(turn && typeof turn.speaker === "string" && typeof turn.segment === "string" && typeof turn.text === "string");
-      })
-      .slice(0, 10);
-  } catch {
-    return [];
-  }
-}
-
-function limitSpeechText(text: string) {
-  const normalized = text.replace(/\s+/g, " ").trim();
-  if (normalized.length <= 280) return normalized;
-  const clipped = normalized.slice(0, 277);
-  return `${clipped.slice(0, Math.max(clipped.lastIndexOf("."), clipped.lastIndexOf(" "), 180)).trim()}...`;
-}
-
-function supplementalReviewCard(index: number, sourceAgent: string): NewAgentCardInput {
-  const templates: NewAgentCardInput[] = [
-    {
-      type: "action",
-      title: "Confirm the next move",
-      body: "The review needs one explicit next move so the team can act instead of continuing to discuss the whole problem space.",
-      proposedUpdate: "Add the next concrete move and the condition that marks it complete.",
-      targetSection: "Next actions",
-      sourceAgent,
-    },
-    {
-      type: "open_question",
-      title: "Resolve the main uncertainty",
-      body: "The active document should name the most important unanswered question before more scope is added.",
-      proposedUpdate: "Add the main open question that blocks a confident decision.",
-      targetSection: "Open questions",
-      sourceAgent,
-    },
-    {
-      type: "warning",
-      title: "Avoid false confidence",
-      body: "The current direction may look more certain than the evidence supports.",
-      proposedUpdate: "Add the weakest evidence point or biggest assumption.",
-      targetSection: "Risks",
-      sourceAgent,
-    },
-  ];
-  const card = templates[index % templates.length];
-  return { ...card, title: `${card.title} ${index}` };
-}
-
-function composerPlaceholder(mode: ChatMode) {
-  if (mode === "chat") return "Ask ARM anything about this document...";
-  if (mode === "product") return "Ask the product persona to evaluate this...";
-  if (mode === "technical") return "Ask the technical persona to evaluate this...";
-  return "Ask the security persona to evaluate this...";
-}
 
 function isStickyNote(note: ChatNote) {
   return Array.isArray(note.tags) && note.tags.includes("note");
 }
 
-function CopyIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <rect x="5" y="3" width="8" height="10" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M3.5 11.5V5.5C3.5 4.67 4.17 4 5 4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function SaveIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M3 2.5h8l2 2V13a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <path d="M5 2.5v4h5v-4" fill="none" stroke="currentColor" strokeWidth="1.4" />
-      <rect x="5" y="9" width="6" height="3" rx="0.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
-    </svg>
-  );
-}
-
-function PencilIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M3.5 11.8 4.1 14l2.2-.6 6.9-6.9-2.8-2.8z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-      <path d="m9.5 4.6 2.8 2.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function PlusIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M8 3.2v9.6M3.2 8h9.6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function LightningIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M8.8 1.8 3.7 8.6h3.5l-.6 5.6 5.6-7.4H8.7z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function TrashIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M3.5 4.5h9" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path d="M6.2 4.5V3.2h3.6v1.3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-      <path d="M5 6.2 5.5 13h5L11 6.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function MegaphoneIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M2.5 8.2h2.2l5.8-3.5v6.6L4.7 8H2.5z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-      <path d="M4.8 8.2 6 13h2.2L7 9.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
-      <path d="M12.1 6.2c.8.9.8 2.6 0 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function sourceAgentLabel(mode: ChatMode | "everything") {
+function sourceAgentLabel(mode: ReviewTarget) {
   if (mode === "product") return "CPO Agent";
   if (mode === "technical") return "Engineering Agent";
   if (mode === "security") return "Security Agent";
-  if (mode === "everything") return "Combined Review";
+  if (mode === "allPersonas") return "Combined Review";
   return "ARM Assistant";
-}
-
-function formatCardType(value: string) {
-  if (value === "open_question") return "Question";
-  return value.replace("_", " ");
-}
-
-function dedupeCards(cards: NewAgentCardInput[]) {
-  const seen = new Set<string>();
-  return cards.filter((card) => {
-    const key = `${card.type}|${card.title}|${card.targetSection || ""}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
 
 async function safeReadText(file: File) {

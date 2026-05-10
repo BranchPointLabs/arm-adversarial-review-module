@@ -1,4 +1,4 @@
-import { PlanMode, PlanQuestion } from "./planning";
+import { PlanQuestion } from "./planning";
 import { AgentCard, NewAgentCardInput, ProjectDocument } from "./projectStore";
 
 export type PlanTicketModel = {
@@ -30,7 +30,6 @@ export type PlanInitiativeModel = {
 
 export type PlanDocumentModel = {
   title: string;
-  mode: PlanMode;
   timecode?: string;
   outcome: string;
   constraint: string;
@@ -48,7 +47,6 @@ export type PlanDocumentModel = {
 
 type PlanModelInput = {
   title: string;
-  mode: PlanMode;
   documents: ProjectDocument[];
   cards: Array<AgentCard | NewAgentCardInput>;
   context: string;
@@ -56,81 +54,26 @@ type PlanModelInput = {
 };
 
 export function normalizePlanModel(input: PlanModelInput, raw: unknown): PlanDocumentModel {
-  const fallback = buildFallbackPlanModel(input);
-  const source = isRecord(raw) ? raw : {};
-  const initiatives = normalizeInitiatives(source.initiatives, fallback.initiatives);
+  if (!isRecord(raw)) {
+    throw new Error("Plan generation returned an unreadable response.");
+  }
+  const source = raw;
+  const initiatives = normalizeInitiatives(source.initiatives);
+  if (initiatives.length === 0) {
+    throw new Error("Plan generation did not return any initiatives.");
+  }
 
   return {
-    title: cleanText(source.title, fallback.title),
-    mode: input.mode,
-    timecode: cleanOptionalText(source.timecode) || fallback.timecode,
-    outcome: cleanText(source.outcome, fallback.outcome),
-    constraint: cleanText(source.constraint, fallback.constraint),
-    decisionSignal: cleanText(source.decisionSignal, fallback.decisionSignal),
-    planningContext: cleanText(source.planningContext, fallback.planningContext),
-    sourceSynthesis: cleanStringList(source.sourceSynthesis, fallback.sourceSynthesis),
-    clarifications: normalizeClarifications(source.clarifications, fallback.clarifications),
+    title: cleanText(source.title, input.title),
+    timecode: cleanOptionalText(source.timecode),
+    outcome: cleanRequiredText(source.outcome, "outcome"),
+    constraint: cleanRequiredText(source.constraint, "constraint"),
+    decisionSignal: cleanRequiredText(source.decisionSignal, "decision signal"),
+    planningContext: cleanText(source.planningContext, input.context.trim() || "No additional context supplied."),
+    sourceSynthesis: cleanStringList(source.sourceSynthesis),
+    clarifications: normalizeClarifications(source.clarifications),
     initiatives,
-    decisionGate: normalizeDecisionGate(source.decisionGate, fallback.decisionGate),
-  };
-}
-
-export function buildFallbackPlanModel(input: PlanModelInput): PlanDocumentModel {
-  const answers = input.questions.map((question) => ({
-    question: question.question,
-    answer: question.skipped ? defaultAnswerForQuestion(question.id, input.mode) : question.answer.trim(),
-  }));
-  const outcome = answerFor(input.questions, "outcome", input.mode);
-  const constraint = answerFor(input.questions, "constraint", input.mode);
-  const decisionSignal = answerFor(input.questions, "signal", input.mode);
-  const sourceSynthesis = summarizeSources(input.documents, input.cards);
-
-  return {
-    title: input.title,
-    mode: input.mode,
-    outcome,
-    constraint,
-    decisionSignal,
-    planningContext: input.context.trim() || "No additional context supplied.",
-    sourceSynthesis,
-    clarifications: answers,
-    initiatives: [
-      initiative("I1", "Product Scope and Success Boundary", `Define the smallest product outcome that can prove: ${outcome}.`, "Set the product promise and success boundary.", [
-        epic("I1E1", "Outcome Definition", "Make the desired user or business outcome explicit.", [
-          ticket("I1E1T1", "State the target outcome", `Define the outcome in user or business language: ${outcome}.`),
-          ticket("I1E1T2", "Define the decision signal", `Translate the success signal into proceed, iterate, and kill conditions: ${decisionSignal}.`),
-        ]),
-        epic("I1E2", "Scope Boundary", "Separate essential scope from deferred scope.", [
-          ticket("I1E2T1", "Identify the essential journey", "Describe the shortest complete journey that can prove value."),
-          ticket("I1E2T2", "Name key assumptions", "Capture the assumptions that could make the plan wrong or too broad."),
-        ]),
-      ]),
-      initiative("I2", "Complete User Value Journey", "Deliver one complete journey that creates recognizable user value.", "Make the core workflow usable from start to finish.", [
-        epic("I2E1", "Primary Journey", "Enable the user to reach the first meaningful result.", [
-          ticket("I2E1T1", "Enable the first meaningful action", "Let the user take the action that starts the value journey."),
-          ticket("I2E1T2", "Present a useful result", "Show the outcome in a way the user can evaluate and act on."),
-        ]),
-        epic("I2E2", "Continuity and Correction", "Let users recover, refine, and continue without losing meaning.", [
-          ticket("I2E2T1", "Support meaningful revision", "Let the user correct or refine work without losing progress."),
-          ticket("I2E2T2", "Preserve current work", "Ensure the latest meaningful version is what the user sees."),
-        ]),
-      ], ["I1"]),
-      initiative("I3", "Validation and Decision Loop", `Evaluate the finished journey against: ${decisionSignal}.`, "Turn delivery evidence into a proceed, iterate, or kill decision.", [
-        epic("I3E1", "Experience Validation", "Confirm the journey delivers user-facing value under the stated constraint.", [
-          ticket("I3E1T1", "Evaluate the full journey", "Review the work from the user's perspective end to end."),
-          ticket("I3E1T2", "Confirm readiness against constraints", `Check whether the work is good enough under the constraint: ${constraint}.`),
-        ]),
-        epic("I3E2", "Evidence and Decision", "Collect evidence and choose the next direction.", [
-          ticket("I3E2T1", "Collect decision evidence", `Gather evidence for the measurable signal: ${decisionSignal}.`),
-          ticket("I3E2T2", "Make the next decision", "Choose proceed, iterate, or kill based on evidence rather than effort invested."),
-        ]),
-      ], ["I1", "I2"]),
-    ],
-    decisionGate: {
-      proceed: `${decisionSignal} is met and no critical blocker remains.`,
-      iterate: "The journey works, but the signal is weak or one clear improvement is needed.",
-      kill: "The work cannot produce meaningful value within the stated constraint.",
-    },
+    decisionGate: normalizeDecisionGate(source.decisionGate),
   };
 }
 
@@ -140,7 +83,7 @@ export function renderPlanMarkdown(model: PlanDocumentModel) {
     model.timecode ? `\n**Timecode:** ${model.timecode}` : "",
     "",
     "## Plan Summary",
-    `**Plan type:** ${model.mode === "kill" ? "Kill Plan" : "Focused Delivery Plan"}`,
+    "**Plan type:** Delivery Plan",
     `**Business outcome:** ${model.outcome}`,
     `**Delivery constraint:** ${model.constraint}`,
     `**Decision signal:** ${model.decisionSignal}`,
@@ -421,162 +364,88 @@ function renderEpicTicketMermaid(item: PlanEpicModel) {
   ].join("\n");
 }
 
-function initiative(
-  id: string,
-  title: string,
-  goal: string,
-  responsibility: string,
-  epics: PlanEpicModel[],
-  dependsOn: string[] = [],
-): PlanInitiativeModel {
-  return {
-    id,
-    title,
-    goal,
-    responsibility,
-    successRequirements: [
-      "The goal is clear enough for a non-technical stakeholder to evaluate.",
-      "The work has one responsibility and can be judged independently.",
-    ],
-    evaluationCriteria: [
-      "A reviewer can tell whether the goal was achieved without inspecting implementation details.",
-      "The work advances the decision signal directly.",
-    ],
-    dependsOn,
-    epics,
-  };
-}
-
-function epic(id: string, title: string, goal: string, tickets: PlanTicketModel[]): PlanEpicModel {
-  return {
-    id,
-    title,
-    goal,
-    responsibility: goal,
-    tickets,
-  };
-}
-
-function ticket(id: string, title: string, goal: string): PlanTicketModel {
-  return {
-    id,
-    title,
-    goal,
-    requirements: [
-      "The expected outcome is visible to the user or stakeholder.",
-      "The work can be completed without prescribing a specific implementation approach.",
-    ],
-    validation: [
-      "A reviewer can verify the outcome from the product behavior or artifact.",
-      "The result supports the parent epic goal.",
-    ],
-  };
-}
-
-function normalizeInitiatives(value: unknown, fallback: PlanInitiativeModel[]) {
-  if (!Array.isArray(value) || value.length === 0) return fallback;
+function normalizeInitiatives(value: unknown) {
+  if (!Array.isArray(value)) return [];
   return value.map((rawItem, index) => {
     const source = isRecord(rawItem) ? rawItem : {};
-    const fallbackItem = fallback[index] || fallback[0];
     const id = normalizeId(source.id, `I${index + 1}`);
-    const epics = normalizeEpics(source.epics, fallbackItem.epics, id);
+    const epics = normalizeEpics(source.epics, id);
     return {
       id,
-      title: cleanText(source.title, fallbackItem.title),
-      goal: cleanText(source.goal, fallbackItem.goal),
-      responsibility: cleanText(source.responsibility, fallbackItem.responsibility),
-      successRequirements: cleanStringList(source.successRequirements, fallbackItem.successRequirements),
-      evaluationCriteria: cleanStringList(source.evaluationCriteria, fallbackItem.evaluationCriteria),
-      dependsOn: cleanStringList(source.dependsOn, fallbackItem.dependsOn).map((item) => normalizeId(item, item)),
+      title: cleanRequiredText(source.title, `initiative ${index + 1} title`),
+      goal: cleanRequiredText(source.goal, `initiative ${index + 1} goal`),
+      responsibility: cleanRequiredText(source.responsibility, `initiative ${index + 1} responsibility`),
+      successRequirements: cleanStringList(source.successRequirements),
+      evaluationCriteria: cleanStringList(source.evaluationCriteria),
+      dependsOn: cleanStringList(source.dependsOn).map((item) => normalizeId(item, item)),
       epics,
     };
   });
 }
 
-function normalizeEpics(value: unknown, fallback: PlanEpicModel[], initiativeId: string) {
-  if (!Array.isArray(value) || value.length === 0) return fallback;
+function normalizeEpics(value: unknown, initiativeId: string) {
+  if (!Array.isArray(value)) return [];
   return value.map((rawItem, index) => {
     const source = isRecord(rawItem) ? rawItem : {};
-    const fallbackItem = fallback[index] || fallback[0];
     const id = normalizeId(source.id, `${initiativeId}E${index + 1}`);
     return {
       id,
-      title: cleanText(source.title, fallbackItem.title),
-      goal: cleanText(source.goal, fallbackItem.goal),
-      responsibility: cleanText(source.responsibility, fallbackItem.responsibility),
-      tickets: normalizeTickets(source.tickets, fallbackItem.tickets, id),
+      title: cleanRequiredText(source.title, `epic ${id} title`),
+      goal: cleanRequiredText(source.goal, `epic ${id} goal`),
+      responsibility: cleanRequiredText(source.responsibility, `epic ${id} responsibility`),
+      tickets: normalizeTickets(source.tickets, id),
     };
   });
 }
 
-function normalizeTickets(value: unknown, fallback: PlanTicketModel[], epicId: string) {
-  if (!Array.isArray(value) || value.length === 0) return fallback;
+function normalizeTickets(value: unknown, epicId: string) {
+  if (!Array.isArray(value)) return [];
   return value.map((rawItem, index) => {
     const source = isRecord(rawItem) ? rawItem : {};
-    const fallbackItem = fallback[index] || fallback[0];
     return {
       id: normalizeId(source.id, `${epicId}T${index + 1}`),
-      title: cleanText(source.title, fallbackItem.title),
-      goal: cleanText(source.goal, fallbackItem.goal),
-      requirements: cleanStringList(source.requirements, fallbackItem.requirements),
-      validation: cleanStringList(source.validation, fallbackItem.validation),
+      title: cleanRequiredText(source.title, `ticket ${epicId}.${index + 1} title`),
+      goal: cleanRequiredText(source.goal, `ticket ${epicId}.${index + 1} goal`),
+      requirements: cleanStringList(source.requirements),
+      validation: cleanStringList(source.validation),
     };
   });
 }
 
-function normalizeClarifications(value: unknown, fallback: Array<{ question: string; answer: string }>) {
-  if (!Array.isArray(value) || value.length === 0) return fallback;
+function normalizeClarifications(value: unknown) {
+  if (!Array.isArray(value)) return [];
   return value.map((item, index) => {
     const source = isRecord(item) ? item : {};
-    const fallbackItem = fallback[index] || fallback[0];
     return {
-      question: cleanText(source.question, fallbackItem.question),
-      answer: cleanText(source.answer, fallbackItem.answer),
+      question: cleanText(source.question, `Clarification ${index + 1}`),
+      answer: cleanText(source.answer, "No answer supplied."),
     };
   });
 }
 
-function normalizeDecisionGate(value: unknown, fallback: PlanDocumentModel["decisionGate"]) {
+function normalizeDecisionGate(value: unknown) {
   const source = isRecord(value) ? value : {};
   return {
-    proceed: cleanText(source.proceed, fallback.proceed),
-    iterate: cleanText(source.iterate, fallback.iterate),
-    kill: cleanText(source.kill, fallback.kill),
+    proceed: cleanRequiredText(source.proceed, "proceed decision gate"),
+    iterate: cleanRequiredText(source.iterate, "iterate decision gate"),
+    kill: cleanRequiredText(source.kill, "kill decision gate"),
   };
 }
 
-function answerFor(questions: PlanQuestion[], id: string, mode: PlanMode) {
-  const question = questions.find((item) => item.id === id);
-  if (!question || question.skipped || !question.answer.trim()) return defaultAnswerForQuestion(id, mode);
-  return question.answer.trim();
-}
-
-function summarizeSources(documents: ProjectDocument[], cards: Array<AgentCard | NewAgentCardInput>) {
-  const documentSummaries = documents.slice(0, 4).map((document) =>
-    `${document.type}: ${document.name} - ${trimSentence(firstMeaningfulLine(document.markdown) || "Selected as a planning source.", 180)}`,
-  );
-  const cardSummaries = cards.slice(0, 4).map((cardItem) =>
-    `${cardItem.sourceAgent}: ${cardItem.title} - ${trimSentence(cardItem.body, 180)}`,
-  );
-  return [...documentSummaries, ...cardSummaries].slice(0, 6);
-}
-
-function defaultAnswerForQuestion(id: string, mode: PlanMode) {
-  if (id === "outcome") {
-    return mode === "kill" ? "Find the cheapest invalidating signal." : "Reduce the largest planning risk.";
-  }
-  if (id === "constraint") return "Keep the work small enough for a solo builder or small team.";
-  return "Use observable evidence to choose proceed, iterate, or kill.";
-}
-
-function cleanStringList(value: unknown, fallback: string[]) {
-  if (!Array.isArray(value)) return fallback;
+function cleanStringList(value: unknown) {
+  if (!Array.isArray(value)) return [];
   const cleaned = value.map((item) => cleanOptionalText(item)).filter((item): item is string => Boolean(item));
-  return cleaned.length > 0 ? cleaned : fallback;
+  return cleaned;
 }
 
 function cleanText(value: unknown, fallback: string) {
   return cleanOptionalText(value) || fallback;
+}
+
+function cleanRequiredText(value: unknown, label: string) {
+  const cleaned = cleanOptionalText(value);
+  if (!cleaned) throw new Error(`Plan generation omitted ${label}.`);
+  return cleaned;
 }
 
 function cleanOptionalText(value: unknown) {
@@ -612,18 +481,6 @@ function numberFromEpicId(id: string) {
 function numberFromTicketId(id: string) {
   const match = /^I(\d+)E(\d+)T(\d+)$/i.exec(id);
   return match ? `${match[1]}.${match[2]}.${match[3]}` : id;
-}
-
-function firstMeaningfulLine(markdown: string) {
-  return markdown
-    .split("\n")
-    .map((line) => line.trim())
-    .find((line) => line && !line.startsWith("#") && line !== "-");
-}
-
-function trimSentence(value: string, maxLength = 220) {
-  const cleaned = value.replace(/\s+/g, " ").trim();
-  return cleaned.length > maxLength ? `${cleaned.slice(0, maxLength - 3)}...` : cleaned;
 }
 
 function ensureTrailingNewline(value: string) {

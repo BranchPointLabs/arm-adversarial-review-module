@@ -10,7 +10,7 @@ import {
   ProjectReference,
   RetrievedMemoryChunk,
 } from "./projectStore";
-import { PlanMode, PlanQuestion } from "./planning";
+import { PlanQuestion } from "./planning";
 import { normalizePlanModel, planModelSchema, renderPlanMarkdown } from "./planModel";
 
 type ProviderReviewMode = ReviewPersonaMode;
@@ -204,7 +204,6 @@ export async function generateDocumentUpdateWithLlm(input: {
 
 export async function generatePlanWithLlm(input: {
   title: string;
-  mode: PlanMode;
   documents: ProjectDocument[];
   cards: NewAgentCardInput[];
   context: string;
@@ -463,7 +462,6 @@ function buildPlanInstruction() {
 
 function buildPlanPayload(input: {
   title: string;
-  mode: PlanMode;
   documents: ProjectDocument[];
   cards: NewAgentCardInput[];
   context: string;
@@ -480,7 +478,6 @@ function buildPlanPayload(input: {
   return JSON.stringify(
     {
       requestedTitle: input.title,
-      mode: input.mode,
       userContext: input.context,
       clarificationAnswers: answers,
       sourceDocuments: input.documents.map((document) => ({

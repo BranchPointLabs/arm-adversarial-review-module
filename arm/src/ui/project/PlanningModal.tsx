@@ -1,15 +1,14 @@
 import React from "react";
-import { PlanMode, PlanQuestion, PlanStage } from "../../core/planning";
+import { PlanQuestion, PlanStage } from "../../core/planning";
 import { ProjectDocument } from "../../core/projectStore";
 import Modal from "../shared/Modal";
 
-type PlanModeModalProps = {
+type PlanningModalProps = {
   busy: boolean;
   planStage: PlanStage;
   selectedDocIds: string[];
   sourceDocuments: ProjectDocument[];
   planContext: string;
-  planMode: PlanMode;
   planQuestions: PlanQuestion[];
   planStatus: string | null;
   onClose: () => void;
@@ -18,11 +17,10 @@ type PlanModeModalProps = {
   onContinue: () => void;
   onToggleSource: (documentId: string) => void;
   onContextChange: (value: string) => void;
-  onModeChange: (mode: PlanMode) => void;
   onQuestionsChange: React.Dispatch<React.SetStateAction<PlanQuestion[]>>;
 };
 
-export default function PlanModeModal(props: PlanModeModalProps) {
+export default function PlanningModal(props: PlanningModalProps) {
   const [activeQuestionIndex, setActiveQuestionIndex] = React.useState(0);
   const questionCount = props.planQuestions.length;
   const isLastQuestion = activeQuestionIndex >= Math.max(0, questionCount - 1);
@@ -33,7 +31,7 @@ export default function PlanModeModal(props: PlanModeModalProps) {
 
   return (
     <Modal
-      title="Plan Mode"
+      title="Planning"
       onClose={props.onClose}
       footer={
         props.planStage === "setup" ? (
@@ -87,7 +85,7 @@ export default function PlanModeModal(props: PlanModeModalProps) {
   );
 }
 
-function PlanSetup(props: PlanModeModalProps) {
+function PlanSetup(props: PlanningModalProps) {
   return (
     <div className="stack">
       <div className="settingsSection">
@@ -120,28 +118,12 @@ function PlanSetup(props: PlanModeModalProps) {
           onChange={(event) => props.onContextChange(event.target.value)}
         />
       </div>
-
-      <div className="settingsSection">
-        <div className="settingsLabel">Mode</div>
-        <div className="segmentedControl planModeBar">
-          {(["focused", "kill"] as const).map((mode) => (
-            <button
-              key={mode}
-              type="button"
-              className={"segmentedPill" + (props.planMode === mode ? " active" : "")}
-              onClick={() => props.onModeChange(mode)}
-            >
-              {mode === "focused" ? "Focused Plan" : "Kill Plan"}
-            </button>
-          ))}
-        </div>
-      </div>
       {props.planStatus ? <div className="status">{props.planStatus}</div> : null}
     </div>
   );
 }
 
-function PlanInterrogation(props: PlanModeModalProps & { activeQuestionIndex: number }) {
+function PlanInterrogation(props: PlanningModalProps & { activeQuestionIndex: number }) {
   const question = props.planQuestions[props.activeQuestionIndex];
   const questionCount = props.planQuestions.length;
   const progressPercent = questionCount > 0 ? ((props.activeQuestionIndex + 1) / questionCount) * 100 : 0;
