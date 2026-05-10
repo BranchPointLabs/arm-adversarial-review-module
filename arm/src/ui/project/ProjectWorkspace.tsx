@@ -8,7 +8,15 @@ import {
   generatePlanWithLlm,
   generateReviewCardsWithLlm,
 } from "../../core/llmReview";
-import { buildPlanQuestions, PlanQuestion, PlanStage } from "../../core/planning";
+import {
+  buildEnrichedPlanningContext,
+  buildPlanOutlineDraft,
+  buildPlanningCards,
+  planningQuestionCardsComplete,
+  planningQuestionsFromCards,
+  PlanningModalCard,
+  PlanStage,
+} from "../../core/planning";
 import { buildScrumReviewArtifact, reviewSessionTurns } from "../../core/reviewSession";
 import { safeSpeechCancel, safeSpeechPause, safeSpeechResume, safeSpeechSpeak } from "../../core/speech";
 import {
@@ -95,7 +103,8 @@ export default function ProjectWorkspace() {
   const [planStage, setPlanStage] = React.useState<PlanStage>("setup");
   const [planSelectedDocIds, setPlanSelectedDocIds] = React.useState<string[]>([]);
   const [planContext, setPlanContext] = React.useState("");
-  const [planQuestions, setPlanQuestions] = React.useState<PlanQuestion[]>([]);
+  const [planningModalCards, setPlanningModalCards] = React.useState<PlanningModalCard[]>([]);
+  const [planOutline, setPlanOutline] = React.useState("");
   const [planStatus, setPlanStatus] = React.useState<string | null>(null);
   const [planGenerating, setPlanGenerating] = React.useState(false);
   const [activePlanPageIndex, setActivePlanPageIndex] = React.useState(0);
@@ -377,22 +386,26 @@ export default function ProjectWorkspace() {
     }
   }
 
+  function resetPlanningModalState() {
+    setPlanContext("");
+    setPlanningModalCards([]);
+    setPlanOutline("");
+    setPlanStage("setup");
+    setPlanStatus(null);
+    setPlanGenerating(false);
+  }
+
   function openPlanning() {
     const initialIds = activeDocument ? [activeDocument.id] : sourceDocuments.slice(0, 1).map((document) => document.id);
     setPlanSelectedDocIds(initialIds);
-    setPlanContext("");
-    setPlanQuestions([]);
-    setPlanStage("setup");
-    setPlanStatus(null);
+    resetPlanningModalState();
     setPlanOpen(true);
   }
 
   function rerunPlan(document: ProjectDocument) {
     setPlanSelectedDocIds(sourceDocuments.slice(0, 3).map((item) => item.id));
+    resetPlanningModalState();
     setPlanContext(`Re-plan from existing plan: ${document.name}`);
-    setPlanQuestions([]);
-    setPlanStage("setup");
-    setPlanStatus(null);
     setPlanOpen(true);
   }
 
@@ -402,16 +415,52 @@ export default function ProjectWorkspace() {
     );
   }
 
-  function startPlanningInterrogation() {
+  function startPlanningDiscovery() {
     const selected = getSelectedPlanDocuments();
     if (selected.length === 0) {
       setPlanStatus("Select at least one source document.");
       return;
     }
-    const questions = buildPlanQuestions(selected, getPlanningCards(), planContext);
-    setPlanQuestions(questions);
-    setPlanStage("interrogation");
+    setPlanningModalCards(buildPlanningCards(selected, getPlanningCards(), planContext));
+    setPlanOutline("");
+    setPlanStage("discovery");
     setPlanStatus(null);
+  }
+
+  function continueFromDiscovery() {
+    const hasQuestions = planningModalCards.some((card) => card.type === "question");
+    if (hasQuestions) {
+      setPlanStage("clarification");
+      setPlanStatus(null);
+      return;
+    }
+    buildOutlineForReview();
+  }
+
+  function buildOutlineForReview() {
+    const selected = getSelectedPlanDocuments();
+    setPlanOutline(
+      buildPlanOutlineDraft({
+        documents: selected,
+        acceptedCards: getPlanningCards(),
+        planningCards: planningModalCards,
+        context: planContext,
+      }),
+    );
+    setPlanStage("outline_review");
+    setPlanStatus(null);
+  }
+
+  function goBackInPlanning() {
+    if (planStage === "discovery") setPlanStage("setup");
+    if (planStage === "clarification") setPlanStage("discovery");
+    if (planStage === "outline_review") {
+      setPlanStage(planningModalCards.some((card) => card.type === "question") ? "clarification" : "discovery");
+    }
+  }
+
+  function updatePlanningCard(cardId: string, update: (card: PlanningModalCard) => PlanningModalCard) {
+    setPlanningModalCards((current) => current.map((card) => (card.id === cardId ? update(card) : card)));
   }
 
   async function createPlanFromAnswers() {
@@ -420,25 +469,30 @@ export default function ProjectWorkspace() {
       setPlanStatus("Select at least one source document.");
       return;
     }
-    const incomplete = planQuestions.find((question) => !question.answer.trim() && !question.skipped);
-    if (incomplete) {
+    if (!planningQuestionCardsComplete(planningModalCards)) {
       setPlanStatus("Answer each question or choose Skip for the ones you want ARM to assume.");
       return;
     }
 
     setBusy(true);
     setPlanGenerating(true);
+    setPlanStage("final_generation");
     try {
       const planTimecode = formatPlanTimecode(new Date());
       const planName = `${selected[0]?.name || projectName} Plan ${planTimecode}`;
       const planningCards = getPlanningCards();
+      const enrichedContext = buildEnrichedPlanningContext({
+        context: planContext,
+        planningCards: planningModalCards,
+        outline: planOutline,
+      });
       const markdown = ensurePlanTimecode(
         await generatePlanWithLlm({
           title: planName,
           documents: selected,
           cards: planningCards,
-          context: planContext,
-          questions: planQuestions,
+          context: enrichedContext,
+          questions: planningQuestionsFromCards(planningModalCards),
         }),
         planTimecode,
       );
@@ -446,12 +500,14 @@ export default function ProjectWorkspace() {
       await projectStore.saveDocument(projectPath, plan.id, markdown);
       setPlanOpen(false);
       setPlanStage("setup");
-      setPlanQuestions([]);
+      setPlanningModalCards([]);
+      setPlanOutline("");
       await refreshAll();
       navigate(`/p/${encodeURIComponent(projectPath)}/documents/${plan.id}`);
       setStatus("Plan generated.");
     } catch (error: any) {
       setPlanStatus(typeof error === "string" ? error : error?.message || "Plan creation failed.");
+      setPlanStage("outline_review");
     } finally {
       setPlanGenerating(false);
       setBusy(false);
@@ -1064,15 +1120,33 @@ export default function ProjectWorkspace() {
           selectedDocIds={planSelectedDocIds}
           sourceDocuments={sourceDocuments}
           planContext={planContext}
-          planQuestions={planQuestions}
+          planningCards={planningModalCards}
+          planOutline={planOutline}
           planStatus={planStatus}
           onClose={() => setPlanOpen(false)}
-          onBack={() => setPlanStage("setup")}
-          onStart={startPlanningInterrogation}
-          onContinue={() => void createPlanFromAnswers()}
+          onBack={goBackInPlanning}
+          onStart={startPlanningDiscovery}
+          onDiscoveryContinue={continueFromDiscovery}
+          onClarificationContinue={buildOutlineForReview}
+          onFinalGenerate={() => void createPlanFromAnswers()}
           onToggleSource={togglePlanSource}
           onContextChange={setPlanContext}
-          onQuestionsChange={setPlanQuestions}
+          onCardAcceptedChange={(cardId, accepted) => updatePlanningCard(cardId, (card) => ({ ...card, accepted }))}
+          onQuestionSuggestedAnswer={(cardId, answer) =>
+            updatePlanningCard(cardId, (card) => ({ ...card, selectedSuggestedAnswer: answer, customAnswer: "", skipped: false }))
+          }
+          onQuestionCustomAnswer={(cardId, answer) =>
+            updatePlanningCard(cardId, (card) => ({ ...card, customAnswer: answer, selectedSuggestedAnswer: undefined, skipped: false }))
+          }
+          onQuestionSkippedChange={(cardId, skipped) =>
+            updatePlanningCard(cardId, (card) => ({
+              ...card,
+              skipped,
+              customAnswer: skipped ? "" : card.customAnswer,
+              selectedSuggestedAnswer: skipped ? undefined : card.selectedSuggestedAnswer,
+            }))
+          }
+          onOutlineChange={setPlanOutline}
         />
       ) : null}
       {planGenerating ? (

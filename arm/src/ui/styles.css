@@ -1094,6 +1094,76 @@ button:disabled {
   padding: 12px;
 }
 
+.planStageRail {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.planStageStep {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 4px;
+  color: var(--muted);
+  font-family: "Segoe UI", sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.planStageStep.active {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.planningCardList {
+  max-height: 360px;
+  display: grid;
+  gap: 10px;
+  overflow: auto;
+}
+
+.planningModalCard {
+  align-content: start;
+}
+
+.suggestedAnswerList {
+  display: grid;
+  gap: 6px;
+}
+
+.suggestedAnswer {
+  width: 100%;
+  border-color: var(--line);
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+
+.suggestedAnswer:hover,
+.suggestedAnswer.active {
+  border-color: var(--ink);
+  background: var(--panel-strong);
+}
+
+.planOutlineEditor {
+  min-height: 360px;
+}
+
+.planGeneratingInline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 16px;
+}
+
 .planProgress {
   display: grid;
   gap: 8px;
