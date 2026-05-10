@@ -11,6 +11,7 @@ import {
   ProjectDocument,
   ProjectReference,
   ProjectStore,
+  ReviewSession,
   RetrievedMemoryChunk,
 } from "./types";
 
@@ -22,6 +23,7 @@ export const tauriProjectStore: ProjectStore = {
   runtime: "desktop",
   listProjects: () => invoke<Project[]>("list_projects"),
   createProject: (name) => invoke<Project>("create_project", { name }),
+  deleteProject: (projectPath) => invoke<void>("delete_project", { projectPath }),
   listDocuments: (projectPath) => invoke<ProjectDocument[]>("list_documents", { projectPath }),
   createDocument: (projectPath, name, type: DocumentType) =>
     invoke<ProjectDocument>("create_document", { projectPath, name, documentType: type }),
@@ -44,6 +46,10 @@ export const tauriProjectStore: ProjectStore = {
   updateReference: (projectPath, referenceId, patch) =>
     invoke<ProjectReference>("update_reference", { projectPath, referenceId, patch }),
   removeReference: (projectPath, referenceId) => invoke<void>("remove_reference", { projectPath, referenceId }),
+  listReviewSessions: (projectPath) => invoke<ReviewSession[]>("list_review_sessions", { projectPath }),
+  loadReviewSession: (projectPath, sessionId) => invoke<ReviewSession>("load_review_session", { projectPath, sessionId }),
+  createScrumReviewSession: (projectPath, input) =>
+    invoke<ReviewSession>("create_scrum_review_session", { projectPath, input }),
   listAgentCards: (projectPath) => invoke<AgentCard[]>("list_agent_cards", { projectPath }),
   retrieveMemoryContext: (args) =>
     invoke<RetrievedMemoryChunk[]>("retrieve_memory_context", {

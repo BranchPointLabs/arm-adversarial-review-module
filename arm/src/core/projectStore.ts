@@ -14,6 +14,9 @@ export type {
   ProjectDocument,
   ProjectReference,
   ProjectStore,
+  ReviewDialogueTurn,
+  ReviewSession,
+  NewReviewSessionInput,
   RetrievedMemoryChunk,
 } from "./types";
 

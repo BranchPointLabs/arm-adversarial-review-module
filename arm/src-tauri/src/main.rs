@@ -126,6 +126,22 @@ struct AgentCard {
   created_at: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewSession {
+  id: String,
+  project_id: String,
+  source_document_id: String,
+  source_document_title: String,
+  title: String,
+  status: String,
+  transcript: String,
+  dialogue_turns: String,
+  card_ids: String,
+  created_at: String,
+  updated_at: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct NewReferenceInput {
@@ -174,6 +190,18 @@ struct AgentCardPatch {
   body: Option<String>,
   proposed_update: Option<String>,
   target_section: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NewReviewSessionInput {
+  source_document_id: String,
+  source_document_title: String,
+  title: String,
+  status: String,
+  transcript: String,
+  dialogue_turns: String,
+  card_ids: String,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -292,6 +320,28 @@ fn create_project(state: tauri::State<AppState>, name: String) -> Result<Project
   }
 
   created
+}
+
+#[command]
+fn delete_project(state: tauri::State<AppState>, project_path: String) -> Result<(), String> {
+  let target = PathBuf::from(project_path);
+  if !target.exists() {
+    return Ok(());
+  }
+
+  let base = state.base_dir.canonicalize().map_err(to_err)?;
+  let canonical_target = target.canonicalize().map_err(to_err)?;
+  if !canonical_target.starts_with(&base) || canonical_target == base {
+    return Err("Project path is outside ARM project storage.".into());
+  }
+
+  let db_path = canonical_target.join("arm.db");
+  if !db_path.exists() {
+    return Err("Selected folder is not an ARM project.".into());
+  }
+
+  fs::remove_dir_all(canonical_target).map_err(to_err)?;
+  Ok(())
 }
 
 #[command]
@@ -739,6 +789,59 @@ fn remove_reference(project_path: String, reference_id: String) -> Result<(), St
 }
 
 #[command]
+fn list_review_sessions(project_path: String) -> Result<Vec<ReviewSession>, String> {
+  let project_path = PathBuf::from(project_path);
+  let conn = open_project_conn(&project_path)?;
+
+  let mut stmt = conn
+    .prepare(
+      "SELECT id, project_id, source_document_id, source_document_title, title, status, transcript, dialogue_turns, card_ids, created_at, updated_at
+       FROM review_sessions
+       ORDER BY created_at DESC",
+    )
+    .map_err(to_err)?;
+  let rows = stmt.query_map([], map_review_session).map_err(to_err)?;
+  Ok(rows.filter_map(Result::ok).collect())
+}
+
+#[command]
+fn load_review_session(project_path: String, session_id: String) -> Result<ReviewSession, String> {
+  let project_path = PathBuf::from(project_path);
+  let conn = open_project_conn(&project_path)?;
+  load_review_session_from_conn(&conn, &session_id)
+}
+
+#[command]
+fn create_scrum_review_session(project_path: String, input: NewReviewSessionInput) -> Result<ReviewSession, String> {
+  let project_path = PathBuf::from(project_path);
+  let conn = open_project_conn(&project_path)?;
+  let project_id = get_project_id(&conn).map_err(to_err)?;
+  let now = Utc::now().to_rfc3339();
+  let id = Uuid::new_v4().to_string();
+
+  conn
+    .execute(
+      "INSERT INTO review_sessions (id, project_id, source_document_id, source_document_title, title, status, transcript, dialogue_turns, card_ids, created_at, updated_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+      params![
+        id,
+        project_id,
+        input.source_document_id,
+        input.source_document_title,
+        input.title,
+        input.status,
+        input.transcript,
+        input.dialogue_turns,
+        input.card_ids,
+        now
+      ],
+    )
+    .map_err(to_err)?;
+  touch_project(&conn, &now).map_err(to_err)?;
+  load_review_session_from_conn(&conn, &id)
+}
+
+#[command]
 fn retrieve_memory_context(
   project_path: String,
   active_document_id: Option<String>,
@@ -970,6 +1073,19 @@ fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
       source_document_title TEXT,
       source_section_title TEXT,
       created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS review_sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      source_document_id TEXT NOT NULL,
+      source_document_title TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL,
+      transcript TEXT NOT NULL,
+      dialogue_turns TEXT NOT NULL,
+      card_ids TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
     CREATE TABLE IF NOT EXISTS memory_documents (
       id TEXT PRIMARY KEY,
@@ -1506,6 +1622,17 @@ fn load_document_from_conn(conn: &Connection, document_id: &str) -> Result<Proje
     .map_err(to_err)
 }
 
+fn load_review_session_from_conn(conn: &Connection, session_id: &str) -> Result<ReviewSession, String> {
+  conn
+    .query_row(
+      "SELECT id, project_id, source_document_id, source_document_title, title, status, transcript, dialogue_turns, card_ids, created_at, updated_at
+       FROM review_sessions WHERE id=?1",
+      params![session_id],
+      map_review_session,
+    )
+    .map_err(to_err)
+}
+
 fn map_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectDocument> {
   let entities_json: String = row.get(5)?;
   let entity_inputs = serde_json::from_str::<Vec<DiagramEntityInput>>(&entities_json).unwrap_or_default();
@@ -1529,6 +1656,22 @@ fn map_document(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectDocument> {
     mermaid: row.get(6)?,
     created_at: row.get(7)?,
     updated_at: row.get(8)?,
+  })
+}
+
+fn map_review_session(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReviewSession> {
+  Ok(ReviewSession {
+    id: row.get(0)?,
+    project_id: row.get(1)?,
+    source_document_id: row.get(2)?,
+    source_document_title: row.get(3)?,
+    title: row.get(4)?,
+    status: row.get(5)?,
+    transcript: row.get(6)?,
+    dialogue_turns: row.get(7)?,
+    card_ids: row.get(8)?,
+    created_at: row.get(9)?,
+    updated_at: row.get(10)?,
   })
 }
 
@@ -2099,7 +2242,7 @@ fn default_document_markdown(name: &str, document_type: &str) -> String {
 
   if document_type == "PLAN" {
     return ensure_trailing_newline(&format!(
-      "# {}\n\n## Initiative 1\n- Source: \n- Why: \n- Action: \n- Success Signal: \n\n## Decision after execution\n- [ ] Proceed\n- [ ] Iterate\n- [ ] Kill\n",
+      "# {}\n\n## Plan Summary\n**Plan type:** Draft plan\n**Business outcome:** \n**Delivery constraint:** \n**Decision signal:** \n\n## Initiatives\n### Initiative 1\n- **Source:** \n- **Why:** \n- **Action:** \n- **Success signal:** \n\n## QA Review\n### QA Objective\n**Decision signal:** \n\n### End-to-End Test Scenarios\n- \n\n### Ticket Acceptance Matrix\n- \n\n## Decision After Execution\n- [ ] **Proceed:** \n- [ ] **Iterate:** \n- [ ] **Kill:** \n",
       name
     ));
   }
@@ -2285,6 +2428,7 @@ fn main() {
     .invoke_handler(tauri::generate_handler![
       list_projects,
       create_project,
+      delete_project,
       list_documents,
       create_document,
       load_document,
@@ -2301,6 +2445,9 @@ fn main() {
       process_repository_reference,
       update_reference,
       remove_reference,
+      list_review_sessions,
+      load_review_session,
+      create_scrum_review_session,
       retrieve_memory_context,
       list_agent_cards,
       create_agent_cards,

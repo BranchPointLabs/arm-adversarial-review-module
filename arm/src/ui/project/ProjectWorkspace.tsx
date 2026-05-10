@@ -20,6 +20,8 @@ import {
   NewAgentCardInput,
   ProjectDocument,
   ProjectReference,
+  ReviewDialogueTurn,
+  ReviewSession,
   projectStore,
 } from "../../core/projectStore";
 import Modal from "../shared/Modal";
@@ -27,7 +29,7 @@ import { buildSidebarItems, cardFilterLabel, CardFilter, countCards, SidebarItem
 import PlanModeModal from "./PlanModeModal";
 
 type ViewKey = "context" | "notes" | "decisions" | "references" | "document";
-type ChatMode = "chat" | "product" | "technical" | "everything";
+type ChatMode = "chat" | "product" | "technical" | "security";
 type ResolveKind = "patch" | "decision" | "open_question";
 type DiagramMode = "diagram" | "code";
 
@@ -69,6 +71,7 @@ export default function ProjectWorkspace() {
   const [cards, setCards] = React.useState<AgentCard[]>([]);
   const [activeDocument, setActiveDocument] = React.useState<ProjectDocument | null>(null);
   const [documentMarkdown, setDocumentMarkdown] = React.useState("");
+  const [documentMarkdownEditing, setDocumentMarkdownEditing] = React.useState(false);
   const [busy, setBusy] = React.useState(false);
   const [submitBusy, setSubmitBusy] = React.useState(false);
   const [status, setStatus] = React.useState<string | null>(null);
@@ -76,6 +79,7 @@ export default function ProjectWorkspace() {
 
   const [prompt, setPrompt] = React.useState("");
   const [chatMode, setChatMode] = React.useState<ChatMode>("chat");
+  const [allReviewMode, setAllReviewMode] = React.useState(false);
   const [cardFilter, setCardFilter] = React.useState<CardFilter>("info");
   const [showAllCards, setShowAllCards] = React.useState(false);
   const [showDismissedCards, setShowDismissedCards] = React.useState(false);
@@ -120,10 +124,18 @@ export default function ProjectWorkspace() {
   const [planStatus, setPlanStatus] = React.useState<string | null>(null);
   const [planGenerating, setPlanGenerating] = React.useState(false);
   const [activePlanPageIndex, setActivePlanPageIndex] = React.useState(0);
+  const [reviewSessionOpen, setReviewSessionOpen] = React.useState(false);
+  const [reviewSession, setReviewSession] = React.useState<ReviewSession | null>(null);
+  const [reviewSessionCards, setReviewSessionCards] = React.useState<AgentCard[]>([]);
+  const [reviewGenerating, setReviewGenerating] = React.useState(false);
+  const [reviewPlaybackState, setReviewPlaybackState] = React.useState<"idle" | "playing" | "paused">("idle");
 
   const filesInputRef = React.useRef<HTMLInputElement | null>(null);
   const folderInputRef = React.useRef<HTMLInputElement | null>(null);
   const draggingRightRail = React.useRef(false);
+  const speechTurnIndexRef = React.useRef(0);
+  const speechTurnsRef = React.useRef<ReviewDialogueTurn[]>([]);
+  const repairedStructuredCardIdsRef = React.useRef<Set<string>>(new Set());
 
   const route = parseRoute(location.pathname);
   const currentView = route.view;
@@ -149,6 +161,7 @@ export default function ProjectWorkspace() {
       null;
     setActiveDocument(nextDocument);
     setDocumentMarkdown(nextDocument?.markdown || "");
+    setDocumentMarkdownEditing(false);
     if (nextDocument?.type === "PLAN") {
       setActivePlanPageIndex(0);
     }
@@ -177,6 +190,24 @@ export default function ProjectWorkspace() {
       window.removeEventListener("pointerup", onPointerUp);
     };
   }, []);
+
+  React.useEffect(() => {
+    return () => {
+      safeSpeechCancel();
+    };
+  }, []);
+
+  React.useEffect(() => {
+    if (!projectPath || cards.length === 0) return;
+    const brokenCard = cards.find((card) => {
+      if (card.status === "rejected" || repairedStructuredCardIdsRef.current.has(card.id)) return false;
+      return extractStructuredCardSections(card.body).length > 1;
+    });
+    if (!brokenCard) return;
+
+    repairedStructuredCardIdsRef.current.add(brokenCard.id);
+    void repairStructuredCard(brokenCard);
+  }, [cards, projectPath]);
 
   if (!projectPath) {
     return <Navigate to="/" replace />;
@@ -211,6 +242,7 @@ export default function ProjectWorkspace() {
     setBusy(true);
     try {
       await projectStore.saveDocument(projectPath, activeDocument.id, documentMarkdown);
+      setDocumentMarkdownEditing(false);
       setStatus("Document saved.");
       await refreshAll();
     } catch (error: any) {
@@ -257,6 +289,48 @@ export default function ProjectWorkspace() {
     }
   }
 
+  async function deleteDiagramNow(document: ProjectDocument) {
+    if (document.type !== "diagram") return;
+    const confirmed = window.confirm(`Delete diagram "${document.name}"?`);
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      await projectStore.deleteDocument(projectPath, document.id);
+      setActiveDocument(null);
+      setDocumentMarkdown("");
+      setDiagramMermaidDraft("");
+      setDiagramCodeEditing(false);
+      await refreshAll();
+      navigate(`/p/${encodeURIComponent(projectPath)}/context`);
+      setStatus("Diagram deleted.");
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Delete failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deletePrdNow(document: ProjectDocument) {
+    if (document.type !== "PRD") return;
+    const confirmed = window.confirm(`Delete PRD "${document.name}"?`);
+    if (!confirmed) return;
+
+    setBusy(true);
+    try {
+      await projectStore.deleteDocument(projectPath, document.id);
+      setActiveDocument(null);
+      setDocumentMarkdown("");
+      await refreshAll();
+      navigate(`/p/${encodeURIComponent(projectPath)}/context`);
+      setStatus("PRD deleted.");
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Delete failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function copyDocumentNow() {
     if (!activeDocument) return;
     try {
@@ -275,7 +349,6 @@ export default function ProjectWorkspace() {
     }
 
     setBusy(true);
-    setPlanGenerating(true);
     try {
       const documentType = newDocumentKind === "diagram" ? "diagram" : newDocumentType;
       const document = await projectStore.createDocument(projectPath, trimmed, documentType);
@@ -290,6 +363,7 @@ export default function ProjectWorkspace() {
       setNewDocumentStatus(typeof error === "string" ? error : error?.message || "Create failed.");
     } finally {
       setBusy(false);
+      setPlanGenerating(false);
     }
   }
 
@@ -553,18 +627,19 @@ export default function ProjectWorkspace() {
   async function submitPrompt() {
     const text = prompt.trim();
     if (!text) return;
+    const effectiveMode = effectiveChatMode(chatMode, allReviewMode);
 
     setSubmitBusy(true);
     try {
-      await projectStore.addChatNote(projectPath, text, ["chat", "user", chatMode]);
-      if (chatMode === "chat") {
-        const newCards = await generateChatCards(text, chatMode);
-        await projectStore.createAgentCards(projectPath, sourceAgentLabel(chatMode), newCards);
+      await projectStore.addChatNote(projectPath, text, ["chat", "user", effectiveMode]);
+      if (effectiveMode === "chat") {
+        const newCards = await generateChatCards(text, "chat");
+        await projectStore.createAgentCards(projectPath, sourceAgentLabel(effectiveMode), newCards);
         setStatus(newCards.length > 1 ? "Chat cards added." : "Chat card added.");
         setCardFilter(firstVisibleCardFilter(newCards));
       } else {
-        const newCards = await buildCardsForPrompt(text);
-        await projectStore.createAgentCards(projectPath, sourceAgentLabel(chatMode), newCards);
+        const newCards = await buildCardsForPrompt(text, effectiveMode);
+        await projectStore.createAgentCards(projectPath, sourceAgentLabel(effectiveMode), newCards);
         setStatus(newCards.length > 1 ? "Cards added." : "Card added.");
         setCardFilter(firstVisibleCardFilter(newCards));
       }
@@ -578,22 +653,23 @@ export default function ProjectWorkspace() {
     }
   }
 
-  async function buildCardsForPrompt(text: string) {
-    const heuristicFallback = (mode: "product" | "technical" | "everything") =>
+  async function buildCardsForPrompt(text: string, effectiveMode: "product" | "technical" | "security" | "everything") {
+    const heuristicFallback = (mode: "product" | "technical" | "security" | "everything") =>
       buildContextCardsFallback(text, mode);
 
     try {
-      if (chatMode === "product") {
+      if (effectiveMode === "product") {
         const cards = await generateReviewCardsWithMode(text, "product");
         return ensureMinimumReviewCards(cards, heuristicFallback("product"), 3);
       }
-      if (chatMode === "technical") {
-        const cards = await generateReviewCardsWithMode(text, "technical");
-        return ensureMinimumReviewCards(cards, heuristicFallback("technical"), 3);
+      if (effectiveMode === "technical" || effectiveMode === "security") {
+        const cards = await generateReviewCardsWithMode(text, effectiveMode);
+        return ensureMinimumReviewCards(cards, heuristicFallback(effectiveMode), 3);
       }
       const results = await Promise.allSettled([
         generateReviewCardsWithMode(text, "product"),
         generateReviewCardsWithMode(text, "technical"),
+        generateReviewCardsWithMode(text, "security"),
       ]);
       const merged = results
         .filter((item): item is PromiseFulfilledResult<NewAgentCardInput[]> => item.status === "fulfilled")
@@ -606,12 +682,12 @@ export default function ProjectWorkspace() {
       throw new Error("LLM review failed.");
     } catch (error: any) {
       setStatus(`${typeof error === "string" ? error : error?.message || "LLM review failed."} Falling back to local review.`);
-      const mode = chatMode === "everything" ? "everything" : (chatMode as "product" | "technical");
+      const mode = effectiveMode === "everything" ? "everything" : effectiveMode;
       return ensureMinimumReviewCards([], heuristicFallback(mode), mode === "everything" ? 7 : 3);
     }
   }
 
-  async function generateReviewCardsWithMode(text: string, mode: "product" | "technical") {
+  async function generateReviewCardsWithMode(text: string, mode: "product" | "technical" | "security") {
     return generateReviewCardsWithLlm({
       projectPath,
       prompt: text,
@@ -622,6 +698,117 @@ export default function ProjectWorkspace() {
       decisions,
       references,
     });
+  }
+
+  async function generateScrumReviewAudioNow() {
+    const sourceDocument = activeDocument;
+    if (!sourceDocument) {
+      setErrorModalMessage("Select a document or plan before generating a Scrum review.");
+      return;
+    }
+
+    const reviewPrompt = [
+      `Generate concise structured review cards for a Scrum review of "${sourceDocument.name}".`,
+      "Focus on the active document and retrieved supporting context.",
+      "Return high-signal risks, open questions, actions, and useful facts only.",
+    ].join("\n");
+
+    setReviewSessionOpen(true);
+    setReviewSession(null);
+    setReviewSessionCards([]);
+    setReviewGenerating(true);
+    setReviewPlaybackState("idle");
+    safeSpeechCancel();
+
+    try {
+      const productCards = ensureMinimumReviewCards(
+        buildContextCardsFallback(reviewPrompt, "product"),
+        [],
+        3,
+      ).slice(0, 4);
+      const technicalCards = ensureMinimumReviewCards(
+        buildContextCardsFallback(reviewPrompt, "technical"),
+        [],
+        3,
+      ).slice(0, 4);
+      const securityCards = ensureMinimumReviewCards(
+        buildContextCardsFallback(reviewPrompt, "security"),
+        [],
+        3,
+      ).slice(0, 4);
+      const proposedCards = dedupeCards([...productCards, ...technicalCards, ...securityCards]).slice(0, 11);
+
+      if (proposedCards.length === 0) {
+        throw new Error("No review cards were generated.");
+      }
+
+      const createdCards = await projectStore.createAgentCards(projectPath, "Scrum Review", proposedCards);
+      const artifact = buildScrumReviewArtifact(sourceDocument, productCards, technicalCards, securityCards, createdCards);
+      const session = await projectStore.createScrumReviewSession(projectPath, {
+        sourceDocumentId: sourceDocument.id,
+        sourceDocumentTitle: sourceDocument.name,
+        title: artifact.title,
+        status: "completed",
+        transcript: artifact.transcript,
+        dialogueTurns: JSON.stringify(artifact.turns),
+        cardIds: JSON.stringify(createdCards.map((card) => card.id)),
+      });
+      setReviewSession(session);
+      setReviewSessionCards(createdCards);
+      setCardFilter(firstVisibleCardFilter(createdCards));
+      await refreshAll();
+    } catch (error: any) {
+      setErrorModalMessage(typeof error === "string" ? error : error?.message || "Scrum review generation failed.");
+    } finally {
+      setReviewGenerating(false);
+    }
+  }
+
+  function playReviewSession() {
+    const turns = reviewSessionTurns(reviewSession);
+    if (turns.length === 0) return;
+    if (reviewPlaybackState === "paused") {
+      safeSpeechResume();
+      setReviewPlaybackState("playing");
+      return;
+    }
+    safeSpeechCancel();
+    speechTurnIndexRef.current = 0;
+    speechTurnsRef.current = turns;
+    setReviewPlaybackState("playing");
+    speakNextReviewTurn();
+  }
+
+  function pauseReviewSession() {
+    safeSpeechPause();
+    setReviewPlaybackState("paused");
+  }
+
+  function restartReviewSession() {
+    safeSpeechCancel();
+    setReviewPlaybackState("idle");
+    speechTurnIndexRef.current = 0;
+    setTimeout(() => playReviewSession(), 0);
+  }
+
+  function speakNextReviewTurn() {
+    const turns = speechTurnsRef.current;
+    const index = speechTurnIndexRef.current;
+    if (index >= turns.length) {
+      setReviewPlaybackState("idle");
+      return;
+    }
+    const turn = turns[index];
+    speechTurnIndexRef.current = index + 1;
+    const utterance = new SpeechSynthesisUtterance(`${turn.speaker}. ${turn.text}`);
+    utterance.rate = 1.02;
+    utterance.pitch = turn.speaker === "Host" ? 1 : 0.95;
+    utterance.onend = () => speakNextReviewTurn();
+    utterance.onerror = () => setReviewPlaybackState("idle");
+    if (!safeSpeechSpeak(utterance)) {
+      setReviewPlaybackState("idle");
+      setErrorModalMessage("Speech playback is not available in this desktop webview, but the review transcript and cards were saved.");
+    }
   }
 
   async function generateChatInfoCard(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput> {
@@ -658,13 +845,14 @@ export default function ProjectWorkspace() {
         decisions,
         references,
       });
-      return cards.slice(0, 3);
+      return normalizeGeneratedCards(cards, mode).slice(0, 3);
     } catch {
-      return [await generateChatInfoCard(text, mode)];
+      const infoCard = await generateChatInfoCard(text, mode);
+      return normalizeGeneratedCards([infoCard], mode).slice(0, 3);
     }
   }
 
-  function buildContextCardsFallback(text: string, mode: "product" | "technical" | "everything") {
+  function buildContextCardsFallback(text: string, mode: "product" | "technical" | "security" | "everything") {
     return buildReviewCards({
       prompt: text,
       mode,
@@ -692,7 +880,7 @@ export default function ProjectWorkspace() {
       references,
     };
 
-    if (chatMode === "everything") {
+    if (allReviewMode) {
       const productPass = await generateDocumentUpdateWithLlm({ ...baseInput, mode: "product" });
       return generateDocumentUpdateWithLlm({
         ...baseInput,
@@ -704,7 +892,7 @@ export default function ProjectWorkspace() {
 
     return generateDocumentUpdateWithLlm({
       ...baseInput,
-      mode: chatMode === "chat" ? "chat" : (chatMode as ChatPersonaMode),
+      mode: chatMode,
     });
   }
 
@@ -717,6 +905,36 @@ export default function ProjectWorkspace() {
       setStatus(typeof error === "string" ? error : error?.message || "Card update failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function clearVisibleCards() {
+    const cardsToClear = sidebarItems.map((item) => item.card).filter((card) => card.status !== "rejected");
+    if (cardsToClear.length === 0) return;
+
+    setBusy(true);
+    try {
+      await Promise.all(cardsToClear.map((card) => projectStore.updateAgentCard(projectPath, card.id, { status: "rejected" })));
+      await refreshAll();
+      setStatus(cardsToClear.length === 1 ? "Card cleared." : `${cardsToClear.length} cards cleared.`);
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Clear failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function repairStructuredCard(card: AgentCard) {
+    const splitCards = normalizeGeneratedCards([card], "chat");
+    if (splitCards.length <= 1) return;
+
+    try {
+      await projectStore.createAgentCards(projectPath, card.sourceAgent || "ARM Assistant", splitCards);
+      await projectStore.updateAgentCard(projectPath, card.id, { status: "rejected" });
+      await refreshAll();
+      setStatus(`${splitCards.length} cards split from one generated response.`);
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Card split failed.");
     }
   }
 
@@ -894,15 +1112,45 @@ export default function ProjectWorkspace() {
               <div className="workspaceNavLabel">Documents</div>
               <div className="documentList" aria-label="Documents">
                 {sourceDocuments.map((document) => (
-                  <button
-                    key={document.id}
-                    type="button"
-                    className={"documentNavItem" + (routeDocumentId === document.id ? " active" : "")}
-                    onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`)}
-                  >
-                    <span className="documentType">{document.type}</span>
-                    <span className="documentName">{document.name}</span>
-                  </button>
+                  document.type === "diagram" || document.type === "PRD" ? (
+                    <div key={document.id} className={"documentNavRow" + (routeDocumentId === document.id ? " active" : "")}>
+                      <button
+                        type="button"
+                        className="documentNavItem"
+                        onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`)}
+                      >
+                        <span className="documentType">{document.type}</span>
+                        <span className="documentName">{document.name}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="iconButton dangerIconButton documentDeleteButton"
+                        title={document.type === "diagram" ? "Delete diagram" : "Delete PRD"}
+                        aria-label={`Delete ${document.type === "diagram" ? "diagram" : "PRD"} ${document.name}`}
+                        disabled={busy}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          if (document.type === "diagram") {
+                            void deleteDiagramNow(document);
+                          } else {
+                            void deletePrdNow(document);
+                          }
+                        }}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      key={document.id}
+                      type="button"
+                      className={"documentNavItem" + (routeDocumentId === document.id ? " active" : "")}
+                      onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`)}
+                    >
+                      <span className="documentType">{document.type}</span>
+                      <span className="documentName">{document.name}</span>
+                    </button>
+                  )
                 ))}
                 {sourceDocuments.length === 0 ? <div className="documentNavEmpty">No documents yet</div> : null}
               </div>
@@ -925,15 +1173,29 @@ export default function ProjectWorkspace() {
               <div className="workspaceNavLabel">Plans</div>
               <div className="documentList" aria-label="Plans">
                 {planDocuments.map((document) => (
-                  <button
-                    key={document.id}
-                    type="button"
-                    className={"documentNavItem" + (routeDocumentId === document.id ? " active" : "")}
-                    onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`)}
-                  >
-                    <span className="documentType">PLAN</span>
-                    <span className="documentName">{document.name}</span>
-                  </button>
+                  <div key={document.id} className={"documentNavRow" + (routeDocumentId === document.id ? " active" : "")}>
+                    <button
+                      type="button"
+                      className="documentNavItem"
+                      onClick={() => navigate(`/p/${encodeURIComponent(projectPath)}/documents/${document.id}`)}
+                    >
+                      <span className="documentType">PLAN</span>
+                      <span className="documentName">{document.name}</span>
+                    </button>
+                    <button
+                      type="button"
+                      className="iconButton dangerIconButton documentDeleteButton"
+                      title="Delete plan"
+                      aria-label={`Delete plan ${document.name}`}
+                      disabled={busy}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void deletePlanNow(document);
+                      }}
+                    >
+                      <TrashIcon />
+                    </button>
+                  </div>
                 ))}
                 {planDocuments.length === 0 ? <div className="documentNavEmpty">No plans yet</div> : null}
               </div>
@@ -1034,6 +1296,14 @@ export default function ProjectWorkspace() {
                 />
                 <span>Show dismissed</span>
               </label>
+              <button
+                type="button"
+                className="linkButton sidebarClearButton"
+                disabled={busy || sidebarItems.every((item) => item.card.status === "rejected")}
+                onClick={() => void clearVisibleCards()}
+              >
+                Clear all
+              </button>
             </div>
             <div className="inputCardList unifiedStream">
               {sidebarItems.map((item) => (
@@ -1057,11 +1327,14 @@ export default function ProjectWorkspace() {
                 }}
               />
               <div className="segmentedControl sidebarActionBar">
-                {(["chat", "product", "technical", "everything"] as ChatMode[]).map((mode) => (
+                {(["chat", "product", "technical", "security"] as ChatMode[]).map((mode) => (
                   <button
                     key={mode}
                     type="button"
-                    className={"segmentedPill" + (chatMode === mode ? " active" : "")}
+                    className={
+                      "segmentedPill" +
+                      (allReviewMode ? (mode === "chat" ? "" : " active") : chatMode === mode ? " active" : "")
+                    }
                     onClick={() => setChatMode(mode)}
                   >
                     {chatModeLabel(mode)}
@@ -1084,6 +1357,14 @@ export default function ProjectWorkspace() {
                     "Submit"
                   )}
                 </button>
+                <label className="sidebarCheckbox allReviewCheckbox">
+                  <input
+                    type="checkbox"
+                    checked={allReviewMode}
+                    onChange={(event) => setAllReviewMode(event.target.checked)}
+                  />
+                  <span>All</span>
+                </label>
               </div>
             </div>
           </>
@@ -1313,6 +1594,84 @@ export default function ProjectWorkspace() {
             <div className="surfaceCopy">Breaking this into initiatives, epics, tickets, and testing criteria.</div>
           </div>
         </div>
+      ) : null}
+
+      {reviewSessionOpen ? (
+        <Modal
+          title="Scrum Review Audio"
+          onClose={() => {
+            safeSpeechCancel();
+            setReviewPlaybackState("idle");
+            setReviewSessionOpen(false);
+          }}
+          footer={
+            <>
+              <button
+                type="button"
+                className="secondary"
+                disabled={reviewGenerating || !reviewSession}
+                onClick={reviewPlaybackState === "playing" ? pauseReviewSession : playReviewSession}
+              >
+                {reviewPlaybackState === "playing" ? "Pause" : reviewPlaybackState === "paused" ? "Resume" : "Play"}
+              </button>
+              <button
+                type="button"
+                className="secondary"
+                disabled={reviewGenerating || !reviewSession}
+                onClick={restartReviewSession}
+              >
+                Restart
+              </button>
+              <button
+                type="button"
+                className="primary"
+                onClick={() => {
+                  safeSpeechCancel();
+                  setReviewPlaybackState("idle");
+                  setReviewSessionOpen(false);
+                }}
+              >
+                Close
+              </button>
+            </>
+          }
+        >
+          {reviewGenerating ? (
+            <div className="reviewSessionGenerating" role="status" aria-live="polite">
+              <span className="spinner generationSpinner" aria-hidden="true" />
+              <div className="surfaceTitle">Generating scrum review</div>
+              <div className="surfaceCopy">Running Product, Technical, and Security passes before creating the audio script.</div>
+            </div>
+          ) : (
+            <div className="reviewSessionPanel">
+              <div className="reviewSessionTranscript">
+                {reviewSessionTurns(reviewSession).map((turn, index) => (
+                  <div key={`${turn.speaker}-${index}`} className="feedItem reviewTurn">
+                    <div className="reviewTurnHeader">
+                      <span className="reviewCardTitle">{turn.speaker}</span>
+                      <span className="feedMeta">{turn.segment}</span>
+                    </div>
+                    <div className="surfaceCopy">{turn.text}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="surfaceTitle">Extracted cards</div>
+              <div className="reviewSessionCards">
+                {reviewSessionCards.map((card) => (
+                  <div key={card.id} className="reviewCard">
+                    <div className="reviewCardHeader">
+                      <span className={"reviewCardType cardTypeBadge cardTypeBadge-" + card.type}>{formatCardType(card.type)}</span>
+                      <span className="reviewCardStatus">{card.sourceAgent}</span>
+                    </div>
+                    <div className="reviewCardTitle">{card.title}</div>
+                    <div className="reviewCardBody">{card.body}</div>
+                  </div>
+                ))}
+                {reviewSessionCards.length === 0 ? <div className="muted">No cards were created for this session.</div> : null}
+              </div>
+            </div>
+          )}
+        </Modal>
       ) : null}
 
       {resolveCard ? (
@@ -1606,6 +1965,16 @@ export default function ProjectWorkspace() {
                 <button
                   type="button"
                   className="iconButton"
+                  title="Generate Scrum Review Audio"
+                  aria-label="Generate Scrum Review Audio"
+                  disabled={busy || reviewGenerating}
+                  onClick={() => void generateScrumReviewAudioNow()}
+                >
+                  <MegaphoneIcon />
+                </button>
+                <button
+                  type="button"
+                  className="iconButton"
                   title="Copy plan"
                   aria-label="Copy plan"
                   onClick={() => void copyDocumentNow()}
@@ -1653,7 +2022,29 @@ export default function ProjectWorkspace() {
                     disabled={!activeDocument}
                     onClick={() => setUpdateOpen(true)}
                   >
-                    <PencilIcon />
+                    <PlusIcon />
+                  </button>
+                  {activeDocument?.type === "PRD" ? (
+                    <button
+                      type="button"
+                      className={"iconButton" + (documentMarkdownEditing ? " active" : "")}
+                      title="Edit markdown"
+                      aria-label="Edit markdown"
+                      disabled={!activeDocument}
+                      onClick={() => setDocumentMarkdownEditing(true)}
+                    >
+                      <PencilIcon />
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="iconButton"
+                    title="Generate Scrum Review Audio"
+                    aria-label="Generate Scrum Review Audio"
+                    disabled={!activeDocument || busy || reviewGenerating}
+                    onClick={() => void generateScrumReviewAudioNow()}
+                  >
+                    <MegaphoneIcon />
                   </button>
                   <button
                     type="button"
@@ -1690,13 +2081,17 @@ export default function ProjectWorkspace() {
             </div>
           }
         >
-          <textarea
-            className="documentEditor"
-            value={documentMarkdown}
-            onChange={(event) => setDocumentMarkdown(event.target.value)}
-            disabled={!activeDocument}
-            spellCheck={false}
-          />
+          {activeDocument?.type === "PRD" && !documentMarkdownEditing ? (
+            <MarkdownReader markdown={documentMarkdown} />
+          ) : (
+            <textarea
+              className="documentEditor"
+              value={documentMarkdown}
+              onChange={(event) => setDocumentMarkdown(event.target.value)}
+              disabled={!activeDocument}
+              spellCheck={false}
+            />
+          )}
         </FocusFrame>
       );
     }
@@ -1719,7 +2114,7 @@ export default function ProjectWorkspace() {
               disabled={!activeDocument}
               onClick={() => setUpdateOpen(true)}
             >
-              <PencilIcon />
+              <PlusIcon />
             </button>
             <button
               type="button"
@@ -1849,7 +2244,7 @@ function PlanFolderView(props: {
               <div className="row">
                 <button
                   type="button"
-                  className="iconButton"
+                  className={"iconButton" + (editing ? " active" : "")}
                   title="Edit page"
                   aria-label="Edit page"
                   disabled={props.busy}
@@ -1884,7 +2279,7 @@ function PlanFolderView(props: {
             spellCheck={false}
           />
         ) : (
-          <pre className="planPageText">{page.content}</pre>
+          <MarkdownReader markdown={page.content} />
         )}
       </div>
     </div>
@@ -1939,6 +2334,122 @@ function PlanWorkCard(props: { node: PlanDiagramNode; emphasis: "parent" | "chil
       <div className="planWorkCardTarget">{props.node.target || "Target: define the outcome of this block of work."}</div>
     </div>
   );
+}
+
+function MarkdownReader(props: { markdown: string }) {
+  return (
+    <div className="markdownReader">
+      {parseMarkdownBlocks(props.markdown).map((block, index) => {
+        if (block.type === "heading") {
+          const Heading = `h${Math.min(4, Math.max(2, block.level))}` as keyof JSX.IntrinsicElements;
+          return <Heading key={index}>{renderInlineMarkdown(block.text)}</Heading>;
+        }
+        if (block.type === "list") {
+          return (
+            <ul key={index}>
+              {block.items.map((item, itemIndex) => (
+                <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+              ))}
+            </ul>
+          );
+        }
+        if (block.type === "code") {
+          return <pre key={index}><code>{block.text}</code></pre>;
+        }
+        return <p key={index}>{renderInlineMarkdown(block.text)}</p>;
+      })}
+    </div>
+  );
+}
+
+function renderInlineMarkdown(text: string) {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return <React.Fragment key={index}>{part}</React.Fragment>;
+  });
+}
+
+type MarkdownBlock =
+  | { type: "heading"; level: number; text: string }
+  | { type: "list"; items: string[] }
+  | { type: "code"; text: string }
+  | { type: "paragraph"; text: string };
+
+function parseMarkdownBlocks(markdown: string): MarkdownBlock[] {
+  const blocks: MarkdownBlock[] = [];
+  const lines = markdown.split(/\r?\n/);
+  let paragraph: string[] = [];
+  let list: string[] = [];
+  let code: string[] = [];
+  let inCode = false;
+
+  function flushParagraph() {
+    if (paragraph.length > 0) {
+      blocks.push({ type: "paragraph", text: paragraph.join(" ").trim() });
+      paragraph = [];
+    }
+  }
+
+  function flushList() {
+    if (list.length > 0) {
+      blocks.push({ type: "list", items: list });
+      list = [];
+    }
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd();
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith("```")) {
+      if (inCode) {
+        blocks.push({ type: "code", text: code.join("\n") });
+        code = [];
+        inCode = false;
+      } else {
+        flushParagraph();
+        flushList();
+        inCode = true;
+      }
+      continue;
+    }
+
+    if (inCode) {
+      code.push(rawLine);
+      continue;
+    }
+
+    if (!trimmed) {
+      flushParagraph();
+      flushList();
+      continue;
+    }
+
+    const heading = /^(#{1,6})\s+(.+)$/.exec(trimmed);
+    if (heading) {
+      flushParagraph();
+      flushList();
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2].trim() });
+      continue;
+    }
+
+    const listItem = /^[-*]\s+(?:\[[ xX]\]\s*)?(.+)$/.exec(trimmed);
+    if (listItem) {
+      flushParagraph();
+      list.push(listItem[1].trim());
+      continue;
+    }
+
+    paragraph.push(trimmed);
+  }
+
+  flushParagraph();
+  flushList();
+  if (code.length > 0) blocks.push({ type: "code", text: code.join("\n") });
+  return blocks.length > 0 ? blocks : [{ type: "paragraph", text: "No content yet." }];
 }
 
 function DiagramCanvas(props: { entities: DiagramEntity[]; mermaid: string }) {
@@ -2488,8 +2999,8 @@ function formatPlanTimecode(date: Date) {
 }
 
 function ensurePlanTimecode(markdown: string, timecode: string) {
-  if (/^Timecode:/m.test(markdown)) return markdown;
-  return markdown.replace(/^(#\s+.+)$/m, `$1\n\nTimecode: ${timecode}`);
+  if (/^(?:\*\*)?Timecode(?::|\*\*:)/m.test(markdown)) return markdown;
+  return markdown.replace(/^(#\s+.+)$/m, `$1\n\n**Timecode:** ${timecode}`);
 }
 
 function isPlanningSourceDocument(document: ProjectDocument | null, markdown: string) {
@@ -2516,7 +3027,11 @@ function chatModeLabel(mode: ChatMode) {
   if (mode === "chat") return "Chat";
   if (mode === "product") return "Product";
   if (mode === "technical") return "Technical";
-  return "Everything";
+  return "Security";
+}
+
+function effectiveChatMode(mode: ChatMode, allReview: boolean): ChatMode | "everything" {
+  return allReview ? "everything" : mode;
 }
 
 function chatInfoCardTitle(mode: ChatPersonaMode) {
@@ -2650,6 +3165,232 @@ function fallbackInfoCard(prompt: string): NewAgentCardInput {
   };
 }
 
+function normalizeGeneratedCards(cards: NewAgentCardInput[], mode: ChatPersonaMode): NewAgentCardInput[] {
+  return dedupeCards(cards.flatMap((card) => splitStructuredCardBody(card, mode)));
+}
+
+function splitStructuredCardBody(card: NewAgentCardInput, mode: ChatPersonaMode): NewAgentCardInput[] {
+  const sections = extractStructuredCardSections(card.body);
+  if (sections.length <= 1) return [card];
+
+  return sections.map((section, index) => ({
+    ...card,
+    type: inferCardTypeFromText(section.text, card.type),
+    title: section.title || `${card.title} ${index + 1}`,
+    body: section.text,
+    proposedUpdate: card.proposedUpdate,
+    targetSection: card.targetSection,
+    sourceAgent: card.sourceAgent || sourceAgentLabel(mode),
+  }));
+}
+
+function extractStructuredCardSections(text: string) {
+  const normalized = text.replace(/\r/g, "").trim();
+  const pattern = /(?:^|\n|\s-{3,}\s*)\s*(?:#{1,6}\s*)?(?:\*\*)?\s*CARD\s+\d+\s*:\s*([^*\n]+?)(?:\*\*)?\s*/gi;
+  const matches = [...normalized.matchAll(pattern)];
+  if (matches.length <= 1) return [];
+
+  return matches.map((match, index) => {
+    const start = (match.index || 0) + match[0].length;
+    const end = matches[index + 1]?.index ?? normalized.length;
+    return {
+      title: cleanInlineMarkdown(match[1]),
+      text: cleanCardBody(normalized.slice(start, end)),
+    };
+  }).filter((section) => section.text.length > 0 || section.title.length > 0);
+}
+
+function cleanCardBody(value: string) {
+  return cleanInlineMarkdown(
+    value
+      .replace(/^\s*[-–—]{3,}\s*/gm, "")
+      .replace(/\b(Rejection reason|User consequence|Impact|Suggestion|Action|Question|Risk):/gi, "$1:")
+      .trim(),
+  );
+}
+
+function cleanInlineMarkdown(value: string) {
+  return value
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function inferCardTypeFromText(text: string, fallback: NewAgentCardInput["type"]): NewAgentCardInput["type"] {
+  const lower = text.toLowerCase();
+  if (/\b(rejection reason|risk|warning|red flag|concern|danger)\b/.test(lower)) return "warning";
+  if (/\b(question|unclear|unknown|missing)\b/.test(lower)) return "open_question";
+  if (/\b(action|next step|recommendation|suggestion)\b/.test(lower)) return "action";
+  return fallback;
+}
+
+function cardsFromSettled(
+  result: PromiseSettledResult<NewAgentCardInput[]>,
+  fallbackCards: NewAgentCardInput[],
+): NewAgentCardInput[] {
+  if (result.status === "fulfilled" && result.value.length > 0) {
+    return result.value.slice(0, 4);
+  }
+  return fallbackCards.slice(0, 3);
+}
+
+function safeSpeechCancel() {
+  try {
+    window.speechSynthesis?.cancel();
+  } catch {
+    // WebView speech support is optional; transcript and cards are the durable artifact.
+  }
+}
+
+function safeSpeechPause() {
+  try {
+    window.speechSynthesis?.pause();
+  } catch {
+    // Playback failure should not affect saved review output.
+  }
+}
+
+function safeSpeechResume() {
+  try {
+    window.speechSynthesis?.resume();
+  } catch {
+    // Playback failure should not affect saved review output.
+  }
+}
+
+function safeSpeechSpeak(utterance: SpeechSynthesisUtterance) {
+  try {
+    if (!window.speechSynthesis) return false;
+    window.speechSynthesis.speak(utterance);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function buildScrumReviewArtifact(
+  document: ProjectDocument,
+  productCards: NewAgentCardInput[],
+  technicalCards: NewAgentCardInput[],
+  securityCards: NewAgentCardInput[],
+  createdCards: AgentCard[],
+) {
+  const product = productCards.slice(0, 2);
+  const technical = technicalCards.slice(0, 2);
+  const security = securityCards.slice(0, 2);
+  const rawTurns: ReviewDialogueTurn[] = [
+    {
+      speaker: "Host",
+      segment: "Intro",
+      text: limitSpeechText(`Today we are reviewing ${document.name}. ARM will keep this to structured Product, Technical, and Security findings.`),
+    },
+    {
+      speaker: "Product",
+      segment: "Product pass",
+      text: summarizeCardsForSpeech(product, "Product found no major business, user, or scope blocker."),
+    },
+    {
+      speaker: "Technical",
+      segment: "Technical pass",
+      text: summarizeCardsForSpeech(technical, "Technical found no major architecture, implementation, or operational blocker."),
+    },
+    {
+      speaker: "Security",
+      segment: "Security pass",
+      text: summarizeCardsForSpeech(security, "Security found no major privacy, compliance, abuse, or retrieval-risk blocker."),
+    },
+    {
+      speaker: "Host",
+      segment: "Conflict/tradeoff section",
+      text: buildTradeoffSpeech(product, technical, security),
+    },
+    {
+      speaker: "Host",
+      segment: "Final recommendations",
+      text: buildRecommendationSpeech(createdCards),
+    },
+    {
+      speaker: "Host",
+      segment: "Card extraction summary",
+      text: limitSpeechText(
+        `ARM created ${createdCards.length} review cards from the structured persona findings. The transcript is playback only; the cards remain the source of truth.`,
+      ),
+    },
+  ];
+  const turns = rawTurns.filter((turn) => turn.text.trim()).slice(0, 10);
+
+  return {
+    title: `Scrum Review: ${document.name}`,
+    turns,
+    transcript: renderReviewTranscript(turns, createdCards),
+  };
+}
+
+function summarizeCardsForSpeech(cards: NewAgentCardInput[], fallback: string) {
+  if (cards.length === 0) return fallback;
+  return limitSpeechText(cards.map(cardToReviewLine).join(" "));
+}
+
+function cardToReviewLine(card: NewAgentCardInput) {
+  const prefix = card.type === "warning" ? "Risk" : card.type === "open_question" ? "Question" : card.type === "action" ? "Action" : "Signal";
+  return `${prefix}: ${card.title}. ${card.body}`;
+}
+
+function buildTradeoffSpeech(
+  productCards: NewAgentCardInput[],
+  technicalCards: NewAgentCardInput[],
+  securityCards: NewAgentCardInput[],
+) {
+  const productRisk = productCards.find((card) => card.type === "warning" || card.type === "open_question");
+  const technicalRisk = technicalCards.find((card) => card.type === "warning" || card.type === "open_question");
+  const securityRisk = securityCards.find((card) => card.type === "warning" || card.type === "open_question");
+  const signals = [productRisk, technicalRisk, securityRisk].filter((card): card is NewAgentCardInput => Boolean(card));
+  if (signals.length === 0) {
+    return "The review did not produce a clear conflict. The next step is to execute the extracted cards in priority order.";
+  }
+  return limitSpeechText(`The main tradeoff is between ${signals.map((card) => card.title).join(", ")}. Resolve those before treating the document as ready.`);
+}
+
+function buildRecommendationSpeech(cards: AgentCard[]) {
+  const actions = cards.filter((card) => card.type === "action").slice(0, 2);
+  if (actions.length > 0) {
+    return limitSpeechText(`Start with ${actions.map((card) => card.title).join(" and ")}. Those actions give the team the clearest next review checkpoint.`);
+  }
+  const firstCards = cards.slice(0, 2);
+  if (firstCards.length > 0) {
+    return limitSpeechText(`Start by resolving ${firstCards.map((card) => card.title).join(" and ")}. Those are the clearest review outputs.`);
+  }
+  return "No final recommendation was created because no structured cards were available.";
+}
+
+function renderReviewTranscript(turns: ReviewDialogueTurn[], cards: AgentCard[]) {
+  const transcript = turns.map((turn) => `## ${turn.segment}\n**${turn.speaker}:** ${turn.text}`).join("\n\n");
+  const cardSummary = cards.map((card) => `- ${formatCardType(card.type)}: ${card.title}`).join("\n");
+  return `${transcript}\n\n## Extracted Cards\n${cardSummary || "- No cards created."}\n`;
+}
+
+function reviewSessionTurns(session: ReviewSession | null): ReviewDialogueTurn[] {
+  if (!session) return [];
+  try {
+    const parsed = JSON.parse(session.dialogueTurns);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((turn): turn is ReviewDialogueTurn => {
+        return Boolean(turn && typeof turn.speaker === "string" && typeof turn.segment === "string" && typeof turn.text === "string");
+      })
+      .slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
+function limitSpeechText(text: string) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= 280) return normalized;
+  const clipped = normalized.slice(0, 277);
+  return `${clipped.slice(0, Math.max(clipped.lastIndexOf("."), clipped.lastIndexOf(" "), 180)).trim()}...`;
+}
+
 function supplementalReviewCard(index: number, sourceAgent: string): NewAgentCardInput {
   const templates: NewAgentCardInput[] = [
     {
@@ -2685,7 +3426,7 @@ function composerPlaceholder(mode: ChatMode) {
   if (mode === "chat") return "Ask ARM anything about this document...";
   if (mode === "product") return "Ask the product persona to evaluate this...";
   if (mode === "technical") return "Ask the technical persona to evaluate this...";
-  return "Send this to both product and technical personas...";
+  return "Ask the security persona to evaluate this...";
 }
 
 function isStickyNote(note: ChatNote) {
@@ -2720,6 +3461,14 @@ function PencilIcon() {
   );
 }
 
+function PlusIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M8 3.2v9.6M3.2 8h9.6" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function LightningIcon() {
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
@@ -2738,11 +3487,27 @@ function TrashIcon() {
   );
 }
 
-function sourceAgentLabel(mode: ChatMode) {
+function MegaphoneIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M2.5 8.2h2.2l5.8-3.5v6.6L4.7 8H2.5z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M4.8 8.2 6 13h2.2L7 9.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M12.1 6.2c.8.9.8 2.6 0 3.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function sourceAgentLabel(mode: ChatMode | "everything") {
   if (mode === "product") return "CPO Agent";
   if (mode === "technical") return "Engineering Agent";
+  if (mode === "security") return "Security Agent";
   if (mode === "everything") return "Combined Review";
   return "ARM Assistant";
+}
+
+function formatCardType(value: string) {
+  if (value === "open_question") return "Question";
+  return value.replace("_", " ");
 }
 
 function dedupeCards(cards: NewAgentCardInput[]) {

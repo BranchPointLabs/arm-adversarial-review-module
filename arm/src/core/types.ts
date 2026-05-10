@@ -54,6 +54,36 @@ export type RetrievedMemoryChunk = {
   sourceKind: "document" | "reference" | "decision";
 };
 
+export type ReviewDialogueTurn = {
+  speaker: "Host" | "Product" | "Technical" | "Security";
+  segment: string;
+  text: string;
+};
+
+export type ReviewSession = {
+  id: string;
+  projectId: string;
+  sourceDocumentId: string;
+  sourceDocumentTitle: string;
+  title: string;
+  status: string;
+  transcript: string;
+  dialogueTurns: string;
+  cardIds: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NewReviewSessionInput = {
+  sourceDocumentId: string;
+  sourceDocumentTitle: string;
+  title: string;
+  status: string;
+  transcript: string;
+  dialogueTurns: string;
+  cardIds: string;
+};
+
 export type AgentCardType =
   | "info"
   | "open_question"
@@ -114,6 +144,7 @@ export type ProjectStore = {
   runtime: "desktop" | "browser";
   listProjects(): Promise<Project[]>;
   createProject(name: string): Promise<Project>;
+  deleteProject(projectPath: string): Promise<void>;
   listDocuments(projectPath: string): Promise<ProjectDocument[]>;
   createDocument(projectPath: string, name: string, type: DocumentType): Promise<ProjectDocument>;
   loadDocument(projectPath: string, documentId: string): Promise<ProjectDocument>;
@@ -134,13 +165,16 @@ export type ProjectStore = {
     patch: Partial<Pick<ProjectReference, "summary" | "extractedText" | "isSelected">>,
   ): Promise<ProjectReference>;
   removeReference(projectPath: string, referenceId: string): Promise<void>;
+  listReviewSessions(projectPath: string): Promise<ReviewSession[]>;
+  loadReviewSession(projectPath: string, sessionId: string): Promise<ReviewSession>;
+  createScrumReviewSession(projectPath: string, input: NewReviewSessionInput): Promise<ReviewSession>;
   listAgentCards(projectPath: string): Promise<AgentCard[]>;
   retrieveMemoryContext(args: {
     projectPath: string;
     activeDocumentId: string | null;
     currentDocumentMarkdown: string;
     focusLine: string;
-    agentType: "product" | "technical" | "everything";
+    agentType: "product" | "technical" | "security" | "everything";
     limit?: number;
   }): Promise<RetrievedMemoryChunk[]>;
   createAgentCards(projectPath: string, sourceAgent: string, cards: NewAgentCardInput[]): Promise<AgentCard[]>;

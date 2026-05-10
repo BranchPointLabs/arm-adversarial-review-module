@@ -316,14 +316,47 @@ button:disabled {
   text-align: left;
 }
 
-.documentNavItem.active,
-.documentNavItem:hover {
+.documentNavRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 6px;
+}
+
+.documentNavRow .documentNavItem {
+  border: 1px solid transparent;
+  border-radius: 6px;
+}
+
+.documentNavRow.active .documentNavItem,
+.documentNavRow:hover .documentNavItem {
   border-color: var(--line-strong);
   background: var(--panel);
 }
 
-.referenceNavItem .documentName {
-  font-weight: 700;
+.documentDeleteButton {
+  width: 30px;
+  height: 30px;
+  opacity: 0.8;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8f2f21;
+}
+
+.documentDeleteButton:hover {
+  background: transparent;
+}
+
+.documentDeleteButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+.documentNavItem.active,
+.documentNavItem:hover {
+  border-color: var(--line-strong);
+  background: var(--panel);
 }
 
 .documentNavEmpty {
@@ -553,6 +586,65 @@ button:disabled {
   line-height: 1.5;
 }
 
+.markdownReader {
+  min-height: 0;
+  overflow: auto;
+  padding: 24px 28px;
+  background: #fff;
+  color: var(--ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+.markdownReader h1,
+.markdownReader h2,
+.markdownReader h3,
+.markdownReader h4 {
+  margin: 0 0 10px;
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.12;
+}
+
+.markdownReader h1,
+.markdownReader h2 {
+  font-size: 30px;
+}
+
+.markdownReader h3 {
+  margin-top: 20px;
+  font-size: 22px;
+}
+
+.markdownReader h4 {
+  margin-top: 16px;
+  font-size: 18px;
+}
+
+.markdownReader p,
+.markdownReader ul,
+.markdownReader pre {
+  margin: 0 0 16px;
+}
+
+.markdownReader ul {
+  padding-left: 24px;
+}
+
+.markdownReader li {
+  margin-bottom: 6px;
+}
+
+.markdownReader pre {
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 14px;
+}
+
 .planPageEditor {
   border: 0;
   border-radius: 0;
@@ -712,6 +804,28 @@ button:disabled {
   font-size: 12px;
 }
 
+.sidebarClearButton {
+  margin-left: auto;
+}
+
+.linkButton {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 0;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.linkButton:hover {
+  color: var(--ink);
+}
+
+.linkButton:disabled {
+  opacity: 0.45;
+}
+
 .sidebarCheckbox {
   display: inline-flex;
   align-items: center;
@@ -750,7 +864,13 @@ button:disabled {
 
 .sidebarComposerFooter {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 10px;
+}
+
+.allReviewCheckbox {
+  min-height: 38px;
 }
 
 .submitButton {
@@ -799,6 +919,40 @@ button:disabled {
   height: 28px;
   border-color: rgba(29, 27, 23, 0.2);
   border-top-color: var(--ink);
+}
+
+.reviewSessionGenerating {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.reviewSessionPanel {
+  display: grid;
+  gap: 14px;
+  max-height: min(620px, calc(100vh - 190px));
+  overflow: auto;
+}
+
+.reviewSessionTranscript,
+.reviewSessionCards {
+  display: grid;
+  gap: 10px;
+}
+
+.reviewTurn {
+  display: grid;
+  gap: 6px;
+}
+
+.reviewTurnHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .settingsSection {
@@ -1316,12 +1470,70 @@ button:disabled {
 
 .projectSummaryItem {
   width: 100%;
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   text-align: left;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
   color: var(--ink);
-  padding: 12px;
+  padding: 12px 14px;
+}
+
+.projectSummaryRow {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 6px;
+}
+
+.projectMenuButton {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.projectMenuButton svg {
+  width: 14px;
+  height: 14px;
+}
+
+.projectMenu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  min-width: 150px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+
+.projectMenuItem {
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  padding: 8px 10px;
+}
+
+.projectMenuItem:hover {
+  background: var(--panel);
+}
+
+.dangerText {
+  color: #8f2f21;
 }
 
 .projectSummaryItem:hover {
@@ -1368,6 +1580,13 @@ button:disabled {
   color: var(--muted);
 }
 
+.reviewCardPills {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
 .cardTypeBadge {
   display: inline-flex;
   align-items: center;
@@ -1394,6 +1613,36 @@ button:disabled {
 .cardTypeBadge-action {
   background: var(--action-bg);
   color: var(--action-fg);
+}
+
+.sourceBadge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 7px;
+  line-height: 1;
+  background: #eee7dc;
+  color: var(--muted);
+}
+
+.sourceBadge-info {
+  background: #eee7dc;
+  color: #5f5548;
+}
+
+.sourceBadge-product {
+  background: #efe6ff;
+  color: #4d2b79;
+}
+
+.sourceBadge-technical {
+  background: #e3eef9;
+  color: #244d73;
+}
+
+.sourceBadge-security {
+  background: #f8e1dc;
+  color: #8f2f21;
 }
 
 .reviewCardTitle {
@@ -1599,6 +1848,15 @@ button.secondary {
 
 .dangerIconButton:hover {
   background: #fff1ed;
+}
+
+.documentDeleteButton,
+.documentDeleteButton:hover,
+.projectMenuButton,
+.projectMenuButton:hover {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 @keyframes spin {

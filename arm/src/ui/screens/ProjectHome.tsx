@@ -6,6 +6,7 @@ export default function ProjectHome(props: { onCreateProject: () => void }) {
   const navigate = useNavigate();
   const [projects, setProjects] = React.useState<Project[]>([]);
   const [status, setStatus] = React.useState<string | null>(null);
+  const [openProjectMenuId, setOpenProjectMenuId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     void refresh();
@@ -20,6 +21,20 @@ export default function ProjectHome(props: { onCreateProject: () => void }) {
     }
   }
 
+  async function deleteProject(project: Project) {
+    const confirmed = window.confirm(`Delete project "${project.name}"? This removes the local project folder.`);
+    if (!confirmed) return;
+
+    try {
+      await projectStore.deleteProject(project.path);
+      setStatus(`Deleted ${project.name}.`);
+      setOpenProjectMenuId(null);
+      await refresh();
+    } catch (error: any) {
+      setStatus(typeof error === "string" ? error : error?.message || "Failed to delete project.");
+    }
+  }
+
   return (
     <div className="page">
       <div className="homeLayout">
@@ -27,15 +42,35 @@ export default function ProjectHome(props: { onCreateProject: () => void }) {
           <div className="surfaceTitle">Recent Projects</div>
           <div className="list compact recentProjectsList">
             {projects.map((project) => (
-              <button
-                key={project.id}
-                type="button"
-                className="projectSummaryItem"
-                onClick={() => navigate(`/p/${encodeURIComponent(project.path)}/context`)}
-              >
-                <div className="listTitle">{project.name}</div>
-                <div className="listMeta">{formatRelativeTime(project.updatedAt)}</div>
-              </button>
+              <div key={project.id} className="projectSummaryRow">
+                <button
+                  type="button"
+                  className="projectSummaryItem"
+                  onClick={() => navigate(`/p/${encodeURIComponent(project.path)}/context`)}
+                >
+                  <span>
+                    <div className="listTitle">{project.name}</div>
+                    <div className="listMeta">{formatRelativeTime(project.updatedAt)}</div>
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="iconButton projectMenuButton"
+                  title="Project actions"
+                  aria-label={`Project actions for ${project.name}`}
+                  aria-expanded={openProjectMenuId === project.id}
+                  onClick={() => setOpenProjectMenuId((value) => (value === project.id ? null : project.id))}
+                >
+                  <DotsIcon />
+                </button>
+                {openProjectMenuId === project.id ? (
+                  <div className="projectMenu" role="menu">
+                    <button type="button" className="projectMenuItem dangerText" role="menuitem" onClick={() => void deleteProject(project)}>
+                      Delete project
+                    </button>
+                  </div>
+                ) : null}
+              </div>
             ))}
             {projects.length === 0 ? <div className="muted">No projects yet.</div> : null}
           </div>
@@ -94,4 +129,14 @@ function formatRelativeTime(value: string) {
   if (deltaSeconds < 86400) return `Updated ${Math.floor(deltaSeconds / 3600)}h ago`;
   if (deltaSeconds < 604800) return `Updated ${Math.floor(deltaSeconds / 86400)}d ago`;
   return `Updated ${new Date(value).toLocaleDateString()}`;
+}
+
+function DotsIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <circle cx="8" cy="8" r="1.1" fill="currentColor" />
+      <circle cx="8" cy="4" r="1.1" fill="currentColor" />
+      <circle cx="8" cy="12" r="1.1" fill="currentColor" />
+    </svg>
+  );
 }

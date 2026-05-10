@@ -1,0 +1,7 @@
+At line:1 char:52
++ ... env:RUST_BACKTRACE=1; $env:PATH = $env:USERPROFILE\.cargo\bin; + $env ...
++                                                       ~~~~~~~~~~~
+Unexpected token '\.cargo\bin' in expression or statement.
+    + CategoryInfo          : ParserError: (:) [], ParentContainsErrorRecordException
+    + FullyQualifiedErrorId : UnexpectedToken
+ 
