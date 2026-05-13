@@ -2,7 +2,7 @@ import React from "react";
 import { PlanPage } from "../../core/planPages";
 import MarkdownReader from "./MarkdownReader";
 import PlanDiagramCanvas from "./PlanDiagramCanvas";
-import { EyeIcon, PencilIcon } from "./ProjectIcons";
+import { EyeIcon, ImageIcon, PencilIcon } from "./ProjectIcons";
 
 export default function PlanFolderView(props: {
   pages: PlanPage[];
@@ -49,7 +49,9 @@ export default function PlanFolderView(props: {
             className={"planPageTab" + (index === props.activePageIndex ? " active" : "")}
             onClick={() => props.onPageChange(index)}
           >
-            <span className="documentType">{item.kind === "diagram" ? "DIAGRAM" : "PAGE"}</span>
+            <span className="documentType" title={item.kind === "diagram" ? "Diagram" : "Page"}>
+              {item.kind === "diagram" ? <ImageIcon /> : "PAGE"}
+            </span>
             <span className="documentName">{item.title}</span>
           </button>
         ))}

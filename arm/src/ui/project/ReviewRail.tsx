@@ -1,4 +1,5 @@
 import React from "react";
+import { ChatMessage } from "../../core/llmReview";
 import { AgentCard } from "../../core/projectStore";
 import { cardFilterLabel, CardFilter, countCards, SidebarItemView } from "./cardSidebar";
 
@@ -13,6 +14,7 @@ export default function ReviewRail(props: {
   showAllCards: boolean;
   showDismissedCards: boolean;
   chatMode: ChatMode;
+  chatMessages: ChatMessage[];
   allReviewMode: boolean;
   prompt: string;
   busy: boolean;
@@ -30,6 +32,8 @@ export default function ReviewRail(props: {
   onAcceptCard: (card: AgentCard) => void;
   onDismissCard: (card: AgentCard) => void;
 }) {
+  const showingChat = props.chatMode === "chat" && !props.allReviewMode;
+
   return (
     <aside className="inputPane reviewRail unifiedSidebar" aria-label="Unified activity sidebar">
       <div
@@ -51,55 +55,70 @@ export default function ReviewRail(props: {
         </button>
       ) : (
         <>
-          <div className="segmentedControl sidebarFeatureBar">
-            {(["info", "open_question", "warning", "action"] as CardFilter[]).map((filter) => (
-              <button
-                key={filter}
-                type="button"
-                className={`segmentedPill cardTypePill cardTypePill-${filter}` + (props.cardFilter === filter ? " active" : "")}
-                onClick={() => props.onCardFilterChange(filter)}
-              >
-                {cardFilterLabel(filter)} ({countCards(props.cards, filter, props.showDismissedCards)})
-              </button>
-            ))}
-          </div>
-          <div className="sidebarVisibilityControls">
-            <label className="sidebarCheckbox">
-              <input
-                type="checkbox"
-                checked={props.showAllCards}
-                onChange={(event) => props.onShowAllCardsChange(event.target.checked)}
-              />
-              <span>Show all</span>
-            </label>
-            <label className="sidebarCheckbox">
-              <input
-                type="checkbox"
-                checked={props.showDismissedCards}
-                onChange={(event) => props.onShowDismissedCardsChange(event.target.checked)}
-              />
-              <span>Show dismissed</span>
-            </label>
-            <button
-              type="button"
-              className="linkButton sidebarClearButton"
-              disabled={props.busy || props.sidebarItems.every((item) => item.card.status === "rejected")}
-              onClick={props.onClearVisibleCards}
-            >
-              Clear all
-            </button>
-          </div>
-          <div className="inputCardList unifiedStream">
-            {props.sidebarItems.map((item) => (
-              <SidebarItemView
-                key={item.id}
-                item={item}
-                onAccept={props.onAcceptCard}
-                onDismiss={props.onDismissCard}
-              />
-            ))}
-            {props.sidebarItems.length === 0 ? <div className="muted">No activity here yet.</div> : null}
-          </div>
+          {showingChat ? (
+            <div className="chatLog unifiedStream" aria-label="Chat conversation">
+              {props.chatMessages.map((message) => (
+                <div key={message.id} className={`chatMessage chatMessage-${message.role}`}>
+                  <div className="chatMessageMeta">{message.role === "user" ? "You" : "ARM"}</div>
+                  <div className="chatMessageBody">{message.content}</div>
+                </div>
+              ))}
+              {props.chatMessages.length === 0 ? <div className="muted">Ask a question to start a session chat.</div> : null}
+              {props.submitBusy ? <div className="muted">ARM is thinking...</div> : null}
+            </div>
+          ) : (
+            <>
+              <div className="segmentedControl sidebarFeatureBar">
+                {(["info", "open_question", "warning", "action"] as CardFilter[]).map((filter) => (
+                  <button
+                    key={filter}
+                    type="button"
+                    className={`segmentedPill cardTypePill cardTypePill-${filter}` + (props.cardFilter === filter ? " active" : "")}
+                    onClick={() => props.onCardFilterChange(filter)}
+                  >
+                    {cardFilterLabel(filter)} ({countCards(props.cards, filter, props.showDismissedCards)})
+                  </button>
+                ))}
+              </div>
+              <div className="sidebarVisibilityControls">
+                <label className="sidebarCheckbox">
+                  <input
+                    type="checkbox"
+                    checked={props.showAllCards}
+                    onChange={(event) => props.onShowAllCardsChange(event.target.checked)}
+                  />
+                  <span>Show all</span>
+                </label>
+                <label className="sidebarCheckbox">
+                  <input
+                    type="checkbox"
+                    checked={props.showDismissedCards}
+                    onChange={(event) => props.onShowDismissedCardsChange(event.target.checked)}
+                  />
+                  <span>Show dismissed</span>
+                </label>
+                <button
+                  type="button"
+                  className="linkButton sidebarClearButton"
+                  disabled={props.busy || props.sidebarItems.every((item) => item.card.status === "rejected")}
+                  onClick={props.onClearVisibleCards}
+                >
+                  Clear all
+                </button>
+              </div>
+              <div className="inputCardList unifiedStream">
+                {props.sidebarItems.map((item) => (
+                  <SidebarItemView
+                    key={item.id}
+                    item={item}
+                    onAccept={props.onAcceptCard}
+                    onDismiss={props.onDismissCard}
+                  />
+                ))}
+                {props.sidebarItems.length === 0 ? <div className="muted">No activity here yet.</div> : null}
+              </div>
+            </>
+          )}
           <div className="sidebarComposer">
             <textarea
               className="sidebarComposerInput"

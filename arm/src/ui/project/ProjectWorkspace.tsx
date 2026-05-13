@@ -2,8 +2,8 @@ import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { dedupeCards, extractStructuredCardSections, normalizeGeneratedCards } from "../../core/cardGeneration";
 import {
-  ChatPersonaMode,
-  generateChatCardsWithLlm,
+  ChatMessage,
+  generateChatReplyWithLlm,
   generateDocumentUpdateWithLlm,
   generatePlanWithLlm,
   generateReviewCardsWithLlm,
@@ -72,6 +72,7 @@ export default function ProjectWorkspace() {
 
   const [prompt, setPrompt] = React.useState("");
   const [chatMode, setChatMode] = React.useState<ChatMode>("chat");
+  const [chatMessages, setChatMessages] = React.useState<ChatMessage[]>([]);
   const [allReviewMode, setAllReviewMode] = React.useState(false);
   const [cardFilter, setCardFilter] = React.useState<CardFilter>("info");
   const [showAllCards, setShowAllCards] = React.useState(false);
@@ -575,21 +576,34 @@ export default function ProjectWorkspace() {
 
     setSubmitBusy(true);
     try {
-      await projectStore.addChatNote(projectPath, text, ["chat", "user", effectiveMode]);
       if (effectiveMode === "chat") {
-        const newCards = await generateChatCards(text, "chat");
-        await projectStore.createAgentCards(projectPath, sourceAgentLabel(effectiveMode), newCards);
-        setStatus(newCards.length > 1 ? "Chat cards added." : "Chat card added.");
-        setCardFilter(firstVisibleCardFilter(newCards));
+        const userMessage = createChatMessage("user", text);
+        const nextMessages = [...chatMessages, userMessage];
+        setChatMessages(nextMessages);
+        setPrompt("");
+
+        const assistantReply = await generateChatReplyWithLlm({
+          projectPath,
+          persona: "chat",
+          messages: nextMessages,
+          latestUserMessage: text,
+          activeDocument,
+          currentContext: activeContextMarkdown,
+          notes,
+          decisions,
+          references,
+        });
+        setChatMessages((current) => [...current, createChatMessage("assistant", assistantReply)]);
+        setStatus("Chat reply added.");
       } else {
+        await projectStore.addChatNote(projectPath, text, ["chat", "user", effectiveMode]);
         const newCards = await buildCardsForPrompt(text, effectiveMode);
         await projectStore.createAgentCards(projectPath, sourceAgentLabel(effectiveMode), newCards);
         setStatus(newCards.length > 1 ? "Cards added." : "Card added.");
         setCardFilter(firstVisibleCardFilter(newCards));
+        setPrompt("");
+        await refreshAll();
       }
-
-      setPrompt("");
-      await refreshAll();
     } catch (error: any) {
       setErrorModalMessage(typeof error === "string" ? error : error?.message || "Submit failed.");
     } finally {
@@ -730,20 +744,6 @@ export default function ProjectWorkspace() {
       setReviewPlaybackState("idle");
       setErrorModalMessage("Speech playback is not available in this desktop webview, but the review transcript and cards were saved.");
     }
-  }
-
-  async function generateChatCards(text: string, mode: ChatPersonaMode): Promise<NewAgentCardInput[]> {
-    const cards = await generateChatCardsWithLlm({
-      projectPath,
-      prompt: text,
-      mode,
-      activeDocument,
-      currentContext: activeContextMarkdown,
-      notes,
-      decisions,
-      references,
-    });
-    return normalizeGeneratedCards(cards, mode).slice(0, 3);
   }
 
   async function buildDocumentUpdate(text: string, kind: "note" | "decision") {
@@ -976,6 +976,7 @@ export default function ProjectWorkspace() {
         showAllCards={showAllCards}
         showDismissedCards={showDismissedCards}
         chatMode={chatMode}
+        chatMessages={chatMessages}
         allReviewMode={allReviewMode}
         prompt={prompt}
         busy={busy}
@@ -1312,6 +1313,15 @@ function createLocalId(name: string) {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "");
   return `${slug || "entity"}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function createChatMessage(role: ChatMessage["role"], content: string): ChatMessage {
+  return {
+    id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    role,
+    content,
+    createdAt: new Date().toISOString(),
+  };
 }
 
 function uniqueIds(ids: string[]) {

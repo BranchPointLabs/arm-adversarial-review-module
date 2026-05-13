@@ -1,6 +1,6 @@
 import { ProjectDocument } from "../../core/projectStore";
 import DiagramCanvas from "./DiagramCanvas";
-import { CopyIcon, PencilIcon, SaveIcon } from "./ProjectIcons";
+import { CopyIcon, ImageIcon, PencilIcon, SaveIcon } from "./ProjectIcons";
 import { FocusFrame } from "./WorkspaceShell";
 
 export type DiagramMode = "diagram" | "code";
@@ -72,8 +72,10 @@ export default function DiagramDocumentView(props: DiagramDocumentViewProps) {
               type="button"
               className={"segmentedPill" + (props.mode === mode ? " active" : "")}
               onClick={() => props.onModeChange(mode)}
+              title={mode === "diagram" ? "Diagram view" : "Code view"}
+              aria-label={mode === "diagram" ? "Diagram view" : "Code view"}
             >
-              {mode === "diagram" ? "DIAGRAM" : "CODE"}
+              {mode === "diagram" ? <ImageIcon /> : "CODE"}
             </button>
           ))}
         </div>

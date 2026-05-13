@@ -390,6 +390,12 @@ button:disabled {
   color: var(--muted);
 }
 
+.documentType svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+}
+
 .documentName {
   min-width: 0;
   overflow: hidden;
@@ -815,6 +821,40 @@ button:disabled {
 
 .unifiedStream {
   padding-right: 4px;
+}
+
+.chatLog {
+  grid-row: 1 / 4;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  overflow: auto;
+}
+
+.chatMessage {
+  display: grid;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 12px;
+}
+
+.chatMessage-user {
+  background: #f7f2e8;
+}
+
+.chatMessageMeta {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.chatMessageBody {
+  white-space: pre-wrap;
+  line-height: 1.4;
 }
 
 .sidebarVisibilityControls {

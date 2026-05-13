@@ -15,6 +15,12 @@ import { normalizePlanModel, planModelSchema, renderPlanMarkdown } from "./planM
 
 type ProviderReviewMode = ReviewPersonaMode;
 export type ChatPersonaMode = "chat" | ReviewPersonaMode;
+export type ChatMessage = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+};
 
 type ReviewRequest = {
   projectPath: string;
@@ -141,8 +147,9 @@ export async function generateChatCardsWithLlm(input: {
 
 export async function generateChatReplyWithLlm(input: {
   projectPath: string;
-  prompt: string;
-  mode: ChatPersonaMode;
+  persona: "chat";
+  messages: ChatMessage[];
+  latestUserMessage: string;
   activeDocument: ProjectDocument | null;
   currentContext: string;
   notes: ChatNote[];
@@ -155,7 +162,7 @@ export async function generateChatReplyWithLlm(input: {
     throw new Error(`No ${providerLabel(settings.provider)} API key saved.`);
   }
 
-  const instructions = buildChatInstruction(input.mode);
+  const instructions = buildChatInstruction(input.persona);
 
   const payload = buildChatPayload(input);
 
@@ -249,8 +256,11 @@ function buildInstruction(mode: ProviderReviewMode) {
 }
 
 function buildChatPayload(input: {
-  prompt: string;
-  mode: ChatPersonaMode;
+  prompt?: string;
+  mode?: ChatPersonaMode;
+  persona?: "chat";
+  messages?: ChatMessage[];
+  latestUserMessage?: string;
   activeDocument: ProjectDocument | null;
   currentContext: string;
   notes: ChatNote[];
@@ -259,12 +269,19 @@ function buildChatPayload(input: {
 }) {
   return JSON.stringify(
     {
-      mode: input.mode,
-      prompt: input.prompt,
+      mode: input.persona || input.mode,
+      prompt: input.latestUserMessage || input.prompt,
+      latestUserMessage: input.latestUserMessage,
+      messages: input.messages?.map((message) => ({
+        role: message.role,
+        content: message.content,
+        createdAt: message.createdAt,
+      })),
       activeDocument: input.activeDocument
         ? {
             name: input.activeDocument.name,
             type: input.activeDocument.type,
+            markdown: input.activeDocument.markdown,
           }
         : null,
       currentContext: input.currentContext,
@@ -284,6 +301,8 @@ function buildChatPayload(input: {
         "Respond as a direct assistant reply to the user.",
         "Do not return JSON.",
         "Do not create a tiny generic answer.",
+        "Use the messages array as the in-session conversation history.",
+        "Answer latestUserMessage while preserving continuity with earlier messages.",
         "Ground the response in the active document and the user's prompt.",
         "If the user is asking for evaluation, include a recommendation, the reasoning, and concrete next steps.",
         "Use short sections or bullets when that makes the answer easier to scan.",
