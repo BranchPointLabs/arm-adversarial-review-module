@@ -2112,7 +2112,7 @@ fn normalize_diagram_entities(entities: Vec<DiagramEntityInput>) -> Vec<DiagramE
 
       Some(DiagramEntityInput {
         id: id.to_string(),
-        name: name.to_string(),
+        name: name.to_uppercase(),
         responsibility: entity.responsibility.trim().to_string(),
         collaborators,
       })

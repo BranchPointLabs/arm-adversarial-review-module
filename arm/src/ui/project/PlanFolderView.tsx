@@ -2,7 +2,7 @@ import React from "react";
 import { PlanPage } from "../../core/planPages";
 import MarkdownReader from "./MarkdownReader";
 import PlanDiagramCanvas from "./PlanDiagramCanvas";
-import { PencilIcon, SaveIcon } from "./ProjectIcons";
+import { EyeIcon, PencilIcon } from "./ProjectIcons";
 
 export default function PlanFolderView(props: {
   pages: PlanPage[];
@@ -15,21 +15,28 @@ export default function PlanFolderView(props: {
   const page = props.activePage || props.pages[0];
   const [editingPageId, setEditingPageId] = React.useState<string | null>(null);
   const [pageDraft, setPageDraft] = React.useState("");
+  const onSavePageRef = React.useRef(props.onSavePage);
   const editing = page?.kind === "document" && editingPageId === page.id;
+
+  React.useEffect(() => {
+    onSavePageRef.current = props.onSavePage;
+  }, [props.onSavePage]);
 
   React.useEffect(() => {
     setEditingPageId(null);
     setPageDraft(page?.content || "");
   }, [page?.id]);
 
+  React.useEffect(() => {
+    if (!page || page.kind !== "document" || !editing || pageDraft === page.content) return;
+    const timeoutId = window.setTimeout(() => {
+      void onSavePageRef.current(page, pageDraft);
+    }, 700);
+    return () => window.clearTimeout(timeoutId);
+  }, [editing, page?.content, page?.id, page?.kind, pageDraft]);
+
   if (!page) {
     return <div className="emptyContextState">No plan pages found.</div>;
-  }
-
-  async function saveCurrentPage() {
-    if (!page || page.kind !== "document") return;
-    await props.onSavePage(page, pageDraft);
-    setEditingPageId(null);
   }
 
   return (
@@ -56,6 +63,16 @@ export default function PlanFolderView(props: {
               <div className="row">
                 <button
                   type="button"
+                  className={"iconButton" + (!editing ? " active" : "")}
+                  title="Reading view"
+                  aria-label="Reading view"
+                  disabled={props.busy}
+                  onClick={() => setEditingPageId(null)}
+                >
+                  <EyeIcon />
+                </button>
+                <button
+                  type="button"
                   className={"iconButton" + (editing ? " active" : "")}
                   title="Edit page"
                   aria-label="Edit page"
@@ -66,16 +83,6 @@ export default function PlanFolderView(props: {
                   }}
                 >
                   <PencilIcon />
-                </button>
-                <button
-                  type="button"
-                  className="iconButton iconButton-primary"
-                  title="Save page"
-                  aria-label="Save page"
-                  disabled={props.busy || !editing}
-                  onClick={() => void saveCurrentPage()}
-                >
-                  <SaveIcon />
                 </button>
               </div>
             ) : null}

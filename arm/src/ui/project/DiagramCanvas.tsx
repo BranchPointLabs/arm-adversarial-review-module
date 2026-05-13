@@ -66,11 +66,22 @@ export default function DiagramCanvas(props: { entities: DiagramEntity[]; mermai
 }
 
 function DiagramNode(props: { node: RenderedDiagramNode }) {
+  const responsibilities = splitResponsibilities(props.node.responsibility);
+
   return (
     <div className="diagramNode">
       <div className="diagramNodeName">{props.node.name}</div>
       <div className="diagramNodeResponsibility">
-        Responsibility: {props.node.responsibility || "Unassigned"}
+        {responsibilities.length > 1 ? "Responsibilities:" : "Responsibility:"}
+        {responsibilities.length > 0 ? (
+          <ul className="diagramResponsibilityList">
+            {responsibilities.map((responsibility) => (
+              <li key={responsibility}>{responsibility}</li>
+            ))}
+          </ul>
+        ) : (
+          " Unassigned"
+        )}
       </div>
     </div>
   );
@@ -97,11 +108,10 @@ function parseMermaidDiagram(mermaid: string): {
     if (nodeMatch) {
       const label = nodeMatch[2].replace(/<br\s*\/?>/gi, "\n").replace(/\\"/g, '"');
       const lines = label.split(/\n+/).map((item) => item.trim()).filter(Boolean);
-      const responsibilityLine = lines.find((item) => item.toLowerCase().startsWith("responsibility:"));
       nodes.set(nodeMatch[1], {
         id: nodeMatch[1],
         name: lines[0] || nodeMatch[1],
-        responsibility: responsibilityLine?.replace(/^responsibility:\s*/i, "") || "",
+        responsibility: extractResponsibilities(lines),
       });
     }
   }
@@ -116,4 +126,22 @@ function parseMermaidDiagram(mermaid: string): {
   }
 
   return { nodes: [...nodes.values()], relationships };
+}
+
+function extractResponsibilities(lines: string[]) {
+  const responsibilityIndex = lines.findIndex((item) => item.toLowerCase().startsWith("responsibility:"));
+  if (responsibilityIndex === -1) return "";
+
+  return lines
+    .slice(responsibilityIndex)
+    .map((item, index) => (index === 0 ? item.replace(/^responsibility:\s*/i, "") : item))
+    .flatMap((item) => splitResponsibilities(item))
+    .join("\n");
+}
+
+function splitResponsibilities(value: string) {
+  return value
+    .split(/\r?\n|[;•]/)
+    .map((item) => item.replace(/^[-*]\s*/, "").trim())
+    .filter(Boolean);
 }

@@ -12,13 +12,13 @@ export function buildSidebarItems(
   showDismissedCards: boolean,
 ): SidebarItem[] {
   return cards
-    .filter((card) => (showAllCards || card.type === cardFilter) && (showDismissedCards || card.status !== "rejected"))
+    .filter((card) => (showAllCards || card.type === cardFilter) && (showDismissedCards || !isClearedCard(card)))
     .map((card) => ({ kind: "card" as const, id: card.id, createdAt: card.createdAt, card }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
 export function countCards(cards: AgentCard[], cardFilter: CardFilter, showDismissedCards: boolean) {
-  return cards.filter((card) => card.type === cardFilter && (showDismissedCards || card.status !== "rejected")).length;
+  return cards.filter((card) => card.type === cardFilter && (showDismissedCards || !isClearedCard(card))).length;
 }
 
 export function SidebarItemView(props: {
@@ -52,7 +52,7 @@ export function SidebarItemView(props: {
           Accept
         </button>
         <button type="button" className="secondary" onClick={() => props.onDismiss(card)}>
-          Dismiss
+          OK
         </button>
       </div>
     </div>
@@ -88,4 +88,8 @@ function formatSourceKind(sourceAgent: string) {
   if (kind === "security") return "Security";
   if (kind === "product") return "Product";
   return "Info";
+}
+
+function isClearedCard(card: AgentCard) {
+  return card.status === "rejected" || card.status === "resolved" || card.status === "accepted";
 }

@@ -120,6 +120,8 @@ export default function ProjectWorkspace() {
   const speechTurnIndexRef = React.useRef(0);
   const speechTurnsRef = React.useRef<ReviewDialogueTurn[]>([]);
   const repairedStructuredCardIdsRef = React.useRef<Set<string>>(new Set());
+  const autosaveTimerRef = React.useRef<number | null>(null);
+  const autosavingDocumentIdRef = React.useRef<string | null>(null);
 
   const route = parseRoute(location.pathname);
   const currentView = route.view;
@@ -161,9 +163,12 @@ export default function ProjectWorkspace() {
       documents.find((item) => item.id === activeDocument?.id) ||
       documents[0] ||
       null;
+    const preserveDraft = nextDocument?.id && autosavingDocumentIdRef.current === nextDocument.id;
     setActiveDocument(nextDocument);
-    setDocumentMarkdown(nextDocument?.markdown || "");
-    setDocumentMarkdownEditing(false);
+    if (!preserveDraft) {
+      setDocumentMarkdown(nextDocument?.markdown || "");
+      setDocumentMarkdownEditing(false);
+    }
     if (nextDocument?.type === "PLAN") {
       setActivePlanPageIndex(0);
     }
@@ -173,6 +178,47 @@ export default function ProjectWorkspace() {
       setDiagramCodeEditing(false);
     }
   }, [documents, routeDocumentId, projectPath]);
+
+  React.useEffect(() => {
+    if (!projectPath || !activeDocument || activeDocument.type === "diagram") return;
+    if (documentMarkdown === activeDocument.markdown) return;
+
+    if (autosaveTimerRef.current !== null) {
+      window.clearTimeout(autosaveTimerRef.current);
+    }
+
+    const documentId = activeDocument.id;
+    const documentType = activeDocument.type;
+    const nextMarkdown = documentMarkdown;
+    autosaveTimerRef.current = window.setTimeout(() => {
+      autosavingDocumentIdRef.current = documentId;
+      void projectStore
+        .saveDocument(projectPath, documentId, nextMarkdown)
+        .then(() => {
+          setDocuments((current) =>
+            current.map((document) =>
+              document.id === documentId ? { ...document, markdown: nextMarkdown, updatedAt: new Date().toISOString() } : document,
+            ),
+          );
+          setActiveDocument((current) =>
+            current?.id === documentId ? { ...current, markdown: nextMarkdown, updatedAt: new Date().toISOString() } : current,
+          );
+          setStatus(documentType === "PLAN" ? "Plan autosaved." : "Document autosaved.");
+        })
+        .catch((error: any) => {
+          setStatus(typeof error === "string" ? error : error?.message || "Autosave failed.");
+        })
+        .finally(() => {
+          autosavingDocumentIdRef.current = null;
+        });
+    }, 700);
+
+    return () => {
+      if (autosaveTimerRef.current !== null) {
+        window.clearTimeout(autosaveTimerRef.current);
+      }
+    };
+  }, [activeDocument, documentMarkdown, projectPath]);
 
   React.useEffect(() => {
     function onPointerMove(event: PointerEvent) {
@@ -804,12 +850,12 @@ export default function ProjectWorkspace() {
       if (resolveKind === "decision") {
         await projectStore.addDecision(projectPath, trimmed, null);
       }
-      await projectStore.updateAgentCard(projectPath, resolveCard.id, { status: "accepted" });
+      await projectStore.updateAgentCard(projectPath, resolveCard.id, { status: "resolved" });
       setResolveCard(null);
       setResolveText("");
       setResolveStatus(null);
       await refreshAll();
-      setStatus("Card accepted.");
+      setStatus("Card resolved.");
     } catch (error: any) {
       setResolveStatus(typeof error === "string" ? error : error?.message || "Resolve failed.");
     } finally {
@@ -892,7 +938,6 @@ export default function ProjectWorkspace() {
             onRerun: rerunPlan,
             onGenerateScrumReview: () => void generateScrumReviewAudioNow(),
             onCopy: () => void documentWorkflow.copyDocumentNow(),
-            onSave: () => void documentWorkflow.saveDocumentNow(),
           }}
           markdownDocument={{
             document: activeDocument,
@@ -907,7 +952,6 @@ export default function ProjectWorkspace() {
             onMarkdownChange: setDocumentMarkdown,
             onEditingChange: setDocumentMarkdownEditing,
             onCopy: () => void documentWorkflow.copyDocumentNow(),
-            onSave: () => void documentWorkflow.saveDocumentNow(),
             isPlanningSourceDocument,
           }}
           context={{
@@ -920,7 +964,6 @@ export default function ProjectWorkspace() {
             onOpenPlanning: openPlanning,
             onMarkdownChange: setDocumentMarkdown,
             onCopy: () => void documentWorkflow.copyDocumentNow(),
-            onSave: () => void documentWorkflow.saveDocumentNow(),
           }}
         />
       </section>

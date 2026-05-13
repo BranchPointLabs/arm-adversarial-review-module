@@ -61,7 +61,7 @@ export default function WorkspaceSidebar(props: {
                       className="documentNavItem"
                       onClick={() => props.onNavigate(`/p/${projectRoute}/documents/${document.id}`)}
                     >
-                      <span className="documentType">{document.type}</span>
+                      <span className="documentType">{document.type === "diagram" ? "DIAGRAM" : document.type}</span>
                       <span className="documentName">{document.name}</span>
                     </button>
                     <button

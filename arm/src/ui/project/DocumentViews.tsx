@@ -1,6 +1,6 @@
 import { ProjectDocument } from "../../core/projectStore";
 import MarkdownReader from "./MarkdownReader";
-import { CopyIcon, LightningIcon, MegaphoneIcon, PencilIcon, PlusIcon, SaveIcon } from "./ProjectIcons";
+import { CopyIcon, EyeIcon, LightningIcon, MegaphoneIcon, PencilIcon, PlusIcon } from "./ProjectIcons";
 import { FocusFrame } from "./WorkspaceShell";
 
 export type MarkdownDocumentViewProps = {
@@ -16,7 +16,6 @@ export type MarkdownDocumentViewProps = {
   onMarkdownChange: (value: string) => void;
   onEditingChange: (editing: boolean) => void;
   onCopy: () => void;
-  onSave: () => void;
   isPlanningSourceDocument: (document: ProjectDocument | null, markdown: string) => boolean;
 };
 
@@ -41,18 +40,6 @@ export function MarkdownDocumentView(props: MarkdownDocumentViewProps) {
               >
                 <PlusIcon />
               </button>
-              {props.document?.type === "PRD" ? (
-                <button
-                  type="button"
-                  className={"iconButton" + (props.editing ? " active" : "")}
-                  title="Edit markdown"
-                  aria-label="Edit markdown"
-                  disabled={!props.document}
-                  onClick={() => props.onEditingChange(true)}
-                >
-                  <PencilIcon />
-                </button>
-              ) : null}
               <button
                 type="button"
                 className="iconButton"
@@ -75,16 +62,16 @@ export function MarkdownDocumentView(props: MarkdownDocumentViewProps) {
               </button>
             </>
           ) : null}
-          <DocumentCopySaveActions
+          <DocumentReadEditActions
             disabled={!props.document}
-            saveDisabled={!props.document || props.busy}
+            editing={props.editing}
             onCopy={props.onCopy}
-            onSave={props.onSave}
+            onEditingChange={props.onEditingChange}
           />
         </div>
       }
     >
-      {props.document?.type === "PRD" && !props.editing ? (
+      {!props.editing ? (
         <MarkdownReader markdown={props.markdown} />
       ) : (
         <textarea
@@ -109,7 +96,6 @@ export type ContextDocumentViewProps = {
   onOpenPlanning: () => void;
   onMarkdownChange: (value: string) => void;
   onCopy: () => void;
-  onSave: () => void;
 };
 
 export function ContextDocumentView(props: ContextDocumentViewProps) {
@@ -143,12 +129,9 @@ export function ContextDocumentView(props: ContextDocumentViewProps) {
           >
             <LightningIcon />
           </button>
-          <DocumentCopySaveActions
-            disabled={!props.document}
-            saveDisabled={props.busy || !props.document}
-            onCopy={props.onCopy}
-            onSave={props.onSave}
-          />
+          <button type="button" className="iconButton" title="Copy document" aria-label="Copy document" disabled={!props.document} onClick={props.onCopy}>
+            <CopyIcon />
+          </button>
         </div>
       }
     >
@@ -172,11 +155,11 @@ export function ContextDocumentView(props: ContextDocumentViewProps) {
   );
 }
 
-function DocumentCopySaveActions(props: {
+function DocumentReadEditActions(props: {
   disabled: boolean;
-  saveDisabled: boolean;
+  editing: boolean;
   onCopy: () => void;
-  onSave: () => void;
+  onEditingChange: (editing: boolean) => void;
 }) {
   return (
     <>
@@ -185,13 +168,23 @@ function DocumentCopySaveActions(props: {
       </button>
       <button
         type="button"
-        className="iconButton iconButton-primary"
-        title="Save document"
-        aria-label="Save document"
-        disabled={props.saveDisabled}
-        onClick={props.onSave}
+        className={"iconButton" + (!props.editing ? " active" : "")}
+        title="Reading view"
+        aria-label="Reading view"
+        disabled={props.disabled}
+        onClick={() => props.onEditingChange(false)}
       >
-        <SaveIcon />
+        <EyeIcon />
+      </button>
+      <button
+        type="button"
+        className={"iconButton" + (props.editing ? " active" : "")}
+        title="Edit markdown"
+        aria-label="Edit markdown"
+        disabled={props.disabled}
+        onClick={() => props.onEditingChange(true)}
+      >
+        <PencilIcon />
       </button>
     </>
   );
