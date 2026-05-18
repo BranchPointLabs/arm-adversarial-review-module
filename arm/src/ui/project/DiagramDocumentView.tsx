@@ -1,6 +1,7 @@
 import { ProjectDocument } from "../../core/projectStore";
+import CopyFeedbackButton from "./CopyFeedbackButton";
 import DiagramCanvas from "./DiagramCanvas";
-import { CopyIcon, ImageIcon, PencilIcon, SaveIcon } from "./ProjectIcons";
+import { ImageIcon, PencilIcon, SaveIcon } from "./ProjectIcons";
 import { FocusFrame } from "./WorkspaceShell";
 
 export type DiagramMode = "diagram" | "code";
@@ -17,7 +18,7 @@ export type DiagramDocumentViewProps = {
   onCodeEditingChange: (editing: boolean) => void;
   onSaveCode: () => void;
   onOpenAddCard: () => void;
-  onCopy: () => void;
+  onCopy: () => Promise<boolean>;
 };
 
 export default function DiagramDocumentView(props: DiagramDocumentViewProps) {
@@ -27,15 +28,7 @@ export default function DiagramDocumentView(props: DiagramDocumentViewProps) {
       description="Diagram document"
       actions={
         <div className="row">
-          <button
-            type="button"
-            className="iconButton"
-            title="Copy Mermaid"
-            aria-label="Copy Mermaid"
-            onClick={props.onCopy}
-          >
-            <CopyIcon />
-          </button>
+          <CopyFeedbackButton title="Copy Mermaid" ariaLabel="Copy Mermaid" onCopy={props.onCopy} />
           {props.mode === "code" ? (
             <>
               <button

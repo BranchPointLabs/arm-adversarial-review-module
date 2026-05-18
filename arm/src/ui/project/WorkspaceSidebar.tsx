@@ -1,8 +1,9 @@
+import type React from "react";
 import { ChatNote, Decision, ProjectDocument, ProjectReference } from "../../core/projectStore";
 import { ImageIcon, TrashIcon } from "./ProjectIcons";
 
 export default function WorkspaceSidebar(props: {
-  navCollapsed: boolean;
+  open: boolean;
   projectName: string;
   projectPath: string;
   currentView: string;
@@ -14,31 +15,52 @@ export default function WorkspaceSidebar(props: {
   decisions: Decision[];
   stickyNotes: ChatNote[];
   busy: boolean;
-  onToggleCollapsed: () => void;
+  onResizeStart: React.PointerEventHandler<HTMLDivElement>;
+  onOpen: () => void;
+  onToggleOpen: () => void;
   onNavigate: (path: string) => void;
   onAddDocument: () => void;
   onDeleteDiagram: (document: ProjectDocument) => void;
+  onDeleteIdea: (document: ProjectDocument) => void;
   onDeletePrd: (document: ProjectDocument) => void;
+  onDeleteJson: (document: ProjectDocument) => void;
   onDeletePlan: (document: ProjectDocument) => void;
 }) {
   const projectRoute = encodeURIComponent(props.projectPath);
 
   return (
     <aside className="navPane workspaceSidebar" aria-label="Project navigation">
+      <div
+        className="leftNavResizeHandle"
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize project navigation"
+        onPointerDown={props.onResizeStart}
+      />
+      {!props.open ? (
+        <button
+          type="button"
+          className="iconButton leftNavOpenButton"
+          title="Open project navigation"
+          aria-label="Open project navigation"
+          onClick={props.onOpen}
+        >
+          {">"}
+        </button>
+      ) : (
+        <>
       <div className="projectLine">
-        {!props.navCollapsed ? <div className="projectNameLine">{props.projectName}</div> : null}
+        <div className="projectNameLine">{props.projectName}</div>
         <button
           type="button"
           className="iconButton"
-          aria-label={props.navCollapsed ? "Expand navigation" : "Collapse navigation"}
-          onClick={props.onToggleCollapsed}
+          aria-label="Collapse navigation"
+          onClick={props.onToggleOpen}
         >
-          {props.navCollapsed ? ">" : "<"}
+          {"<"}
         </button>
       </div>
 
-      {!props.navCollapsed ? (
-        <>
           <div className="workspaceNavBlock">
             <div className="workspaceNavLabel">Project</div>
             <button
@@ -54,27 +76,29 @@ export default function WorkspaceSidebar(props: {
             <div className="workspaceNavLabel">Documents</div>
             <div className="documentList" aria-label="Documents">
               {props.sourceDocuments.map((document) => (
-                document.type === "diagram" || document.type === "PRD" ? (
+                document.type === "diagram" || document.type === "IDEA" || document.type === "PRD" || document.type === "json" ? (
                   <div key={document.id} className={"documentNavRow" + (props.routeDocumentId === document.id ? " active" : "")}>
                     <button
                       type="button"
                       className="documentNavItem"
                       onClick={() => props.onNavigate(`/p/${projectRoute}/documents/${document.id}`)}
                     >
-                      <span className="documentType" title={document.type === "diagram" ? "Diagram" : document.type}>
-                        {document.type === "diagram" ? <ImageIcon /> : document.type}
+                      <span className="documentType" title={document.type === "diagram" ? "Diagram" : document.type.toUpperCase()}>
+                        {document.type === "diagram" ? <ImageIcon /> : document.type.toUpperCase()}
                       </span>
                       <span className="documentName">{document.name}</span>
                     </button>
                     <button
                       type="button"
                       className="iconButton dangerIconButton documentDeleteButton"
-                      title={document.type === "diagram" ? "Delete diagram" : "Delete PRD"}
-                      aria-label={`Delete ${document.type === "diagram" ? "diagram" : "PRD"} ${document.name}`}
+                      title={`Delete ${documentDeleteLabel(document)}`}
+                      aria-label={`Delete ${documentDeleteLabel(document)} ${document.name}`}
                       disabled={props.busy}
                       onClick={(event) => {
                         event.stopPropagation();
                         if (document.type === "diagram") props.onDeleteDiagram(document);
+                        else if (document.type === "IDEA") props.onDeleteIdea(document);
+                        else if (document.type === "json") props.onDeleteJson(document);
                         else props.onDeletePrd(document);
                       }}
                     >
@@ -113,69 +137,78 @@ export default function WorkspaceSidebar(props: {
               {props.references.length === 0 ? <div className="documentNavEmpty">No references yet</div> : null}
             </div>
 
-            <div className="workspaceNavLabel">Plans</div>
-            <div className="documentList" aria-label="Plans">
-              {props.planDocuments.map((document) => (
-                <div key={document.id} className={"documentNavRow" + (props.routeDocumentId === document.id ? " active" : "")}>
-                  <button
-                    type="button"
-                    className="documentNavItem"
-                    onClick={() => props.onNavigate(`/p/${projectRoute}/documents/${document.id}`)}
-                  >
-                    <span className="documentType">PLAN</span>
-                    <span className="documentName">{document.name}</span>
-                  </button>
-                  <button
-                    type="button"
-                    className="iconButton dangerIconButton documentDeleteButton"
-                    title="Delete plan"
-                    aria-label={`Delete plan ${document.name}`}
-                    disabled={props.busy}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      props.onDeletePlan(document);
-                    }}
-                  >
-                    <TrashIcon />
-                  </button>
+            {props.planDocuments.length > 0 ? (
+              <>
+                <div className="workspaceNavLabel">Plans</div>
+                <div className="documentList" aria-label="Plans">
+                  {props.planDocuments.map((document) => (
+                    <div key={document.id} className={"documentNavRow" + (props.routeDocumentId === document.id ? " active" : "")}>
+                      <button
+                        type="button"
+                        className="documentNavItem"
+                        onClick={() => props.onNavigate(`/p/${projectRoute}/documents/${document.id}`)}
+                      >
+                        <span className="documentType">PLAN</span>
+                        <span className="documentName">{document.name}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="iconButton dangerIconButton documentDeleteButton"
+                        title="Delete plan"
+                        aria-label={`Delete plan ${document.name}`}
+                        disabled={props.busy}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          props.onDeletePlan(document);
+                        }}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </div>
+                  ))}
                 </div>
-              ))}
-              {props.planDocuments.length === 0 ? <div className="documentNavEmpty">No plans yet</div> : null}
-            </div>
+              </>
+            ) : null}
 
-            <div className="workspaceNavLabel">Decisions</div>
-            <div className="documentList" aria-label="Decisions">
-              {props.decisions.slice(0, 5).map((decision) => (
-                <button
-                  key={decision.id}
-                  type="button"
-                  className={"documentNavItem decisionNavItem" + (props.currentView === "decisions" ? " active" : "")}
-                  onClick={() => props.onNavigate(`/p/${projectRoute}/decisions`)}
-                  title={decision.text}
-                >
-                  <span className="documentType">DEC</span>
-                  <span className="documentName">{decision.text}</span>
-                </button>
-              ))}
-              {props.decisions.length === 0 ? <div className="documentNavEmpty">No decisions yet</div> : null}
-            </div>
+            {props.decisions.length > 0 ? (
+              <>
+                <div className="workspaceNavLabel">Decisions</div>
+                <div className="documentList" aria-label="Decisions">
+                  {props.decisions.slice(0, 5).map((decision) => (
+                    <button
+                      key={decision.id}
+                      type="button"
+                      className={"documentNavItem decisionNavItem" + (props.currentView === "decisions" ? " active" : "")}
+                      onClick={() => props.onNavigate(`/p/${projectRoute}/decisions`)}
+                      title={decision.text}
+                    >
+                      <span className="documentType">DEC</span>
+                      <span className="documentName">{decision.text}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
 
-            <div className="workspaceNavLabel">Notes</div>
-            <div className="documentList" aria-label="Notes">
-              {props.stickyNotes.slice(0, 5).map((note) => (
-                <button
-                  key={note.id}
-                  type="button"
-                  className={"documentNavItem noteNavItem" + (props.currentView === "notes" ? " active" : "")}
-                  onClick={() => props.onNavigate(`/p/${projectRoute}/notes`)}
-                  title={note.text}
-                >
-                  <span className="documentType">NOTE</span>
-                  <span className="documentName">{note.text}</span>
-                </button>
-              ))}
-              {props.stickyNotes.length === 0 ? <div className="documentNavEmpty">No notes yet</div> : null}
-            </div>
+            {props.stickyNotes.length > 0 ? (
+              <>
+                <div className="workspaceNavLabel">Notes</div>
+                <div className="documentList" aria-label="Notes">
+                  {props.stickyNotes.slice(0, 5).map((note) => (
+                    <button
+                      key={note.id}
+                      type="button"
+                      className={"documentNavItem noteNavItem" + (props.currentView === "notes" ? " active" : "")}
+                      onClick={() => props.onNavigate(`/p/${projectRoute}/notes`)}
+                      title={note.text}
+                    >
+                      <span className="documentType">NOTE</span>
+                      <span className="documentName">{note.text}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : null}
           </div>
 
           <div className="documentNavFooter">
@@ -184,7 +217,14 @@ export default function WorkspaceSidebar(props: {
             </button>
           </div>
         </>
-      ) : null}
+      )}
     </aside>
   );
+}
+
+function documentDeleteLabel(document: ProjectDocument) {
+  if (document.type === "diagram") return "diagram";
+  if (document.type === "IDEA") return "idea";
+  if (document.type === "json") return "JSON document";
+  return document.type;
 }

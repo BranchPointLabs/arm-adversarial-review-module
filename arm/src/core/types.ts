@@ -22,7 +22,7 @@ export type Decision = {
   createdAt: string;
 };
 
-export type DocumentType = "IDEA" | "PRD" | "PLAN" | "diagram";
+export type DocumentType = "IDEA" | "PRD" | "PLAN" | "diagram" | "json";
 
 export type DiagramEntity = {
   id: string;

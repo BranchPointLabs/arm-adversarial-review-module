@@ -1,6 +1,7 @@
 import React from "react";
 import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
 import { dedupeCards, extractStructuredCardSections, normalizeGeneratedCards } from "../../core/cardGeneration";
+import { parseJsonDocument } from "../../core/jsonDocument";
 import {
   ChatMessage,
   generateChatReplyWithLlm,
@@ -55,7 +56,7 @@ export default function ProjectWorkspace() {
   const projectPath = params.projectPath ? decodeURIComponent(params.projectPath) : "";
   const projectName = projectPath.split(/[\\/]/).filter(Boolean).pop() || "Project";
 
-  const [navCollapsed, setNavCollapsed] = React.useState(false);
+  const [leftNavWidth, setLeftNavWidth] = React.useState(260);
   const [rightRailWidth, setRightRailWidth] = React.useState(420);
   const [documents, setDocuments] = React.useState<ProjectDocument[]>([]);
   const [notes, setNotes] = React.useState<ChatNote[]>([]);
@@ -100,7 +101,6 @@ export default function ProjectWorkspace() {
   const [resolveText, setResolveText] = React.useState("");
   const [resolveStatus, setResolveStatus] = React.useState<string | null>(null);
   const [resolveBusy, setResolveBusy] = React.useState(false);
-  const [copyToastVisible, setCopyToastVisible] = React.useState(false);
 
   const [planOpen, setPlanOpen] = React.useState(false);
   const [planStage, setPlanStage] = React.useState<PlanStage>("setup");
@@ -119,13 +119,13 @@ export default function ProjectWorkspace() {
 
   const filesInputRef = React.useRef<HTMLInputElement | null>(null);
   const folderInputRef = React.useRef<HTMLInputElement | null>(null);
+  const draggingLeftNav = React.useRef(false);
   const draggingRightRail = React.useRef(false);
   const speechTurnIndexRef = React.useRef(0);
   const speechTurnsRef = React.useRef<ReviewDialogueTurn[]>([]);
   const repairedStructuredCardIdsRef = React.useRef<Set<string>>(new Set());
   const autosaveTimerRef = React.useRef<number | null>(null);
   const autosavingDocumentIdRef = React.useRef<string | null>(null);
-  const copyToastTimerRef = React.useRef<number | null>(null);
 
   const route = parseRoute(location.pathname);
   const currentView = route.view;
@@ -135,6 +135,7 @@ export default function ProjectWorkspace() {
   const sidebarItems = buildSidebarItems(cards, cardFilter, showAllCards, showDismissedCards);
   const sourceDocuments = documents.filter((document) => document.type !== "PLAN");
   const planDocuments = documents.filter((document) => document.type === "PLAN");
+  const leftNavOpen = leftNavWidth >= 120;
   const rightRailOpen = rightRailWidth >= 220;
   const referenceWorkflow = useReferenceWorkflow({ projectPath, setBusy, setStatus, refreshAll });
   const documentWorkflow = useDocumentWorkflow({
@@ -151,7 +152,6 @@ export default function ProjectWorkspace() {
     setDiagramMermaidDraft,
     setDiagramCodeEditing,
     setPlanGenerating,
-    onCopySuccess: showCopyToast,
     refreshAll,
     navigate,
   });
@@ -227,12 +227,17 @@ export default function ProjectWorkspace() {
 
   React.useEffect(() => {
     function onPointerMove(event: PointerEvent) {
+      if (draggingLeftNav.current) {
+        const nextWidth = Math.min(360, Math.max(40, event.clientX));
+        setLeftNavWidth(nextWidth);
+      }
       if (!draggingRightRail.current) return;
       const nextWidth = Math.min(520, Math.max(40, window.innerWidth - event.clientX));
       setRightRailWidth(nextWidth);
     }
 
     function onPointerUp() {
+      draggingLeftNav.current = false;
       draggingRightRail.current = false;
     }
 
@@ -247,29 +252,16 @@ export default function ProjectWorkspace() {
   React.useEffect(() => {
     return () => {
       safeSpeechCancel();
-      if (copyToastTimerRef.current !== null) {
-        window.clearTimeout(copyToastTimerRef.current);
-      }
     };
   }, []);
-
-  function showCopyToast() {
-    setCopyToastVisible(true);
-    if (copyToastTimerRef.current !== null) {
-      window.clearTimeout(copyToastTimerRef.current);
-    }
-    copyToastTimerRef.current = window.setTimeout(() => {
-      setCopyToastVisible(false);
-      copyToastTimerRef.current = null;
-    }, 1400);
-  }
 
   async function copyDiagramMermaidNow() {
     try {
       await navigator.clipboard.writeText(diagramMermaidDraft);
-      showCopyToast();
+      return true;
     } catch (error: any) {
       setErrorModalMessage(typeof error === "string" ? error : error?.message || "Copy failed.");
+      return false;
     }
   }
 
@@ -777,6 +769,9 @@ export default function ProjectWorkspace() {
     if (!activeDocument) {
       throw new Error("Create and select a document before updating it.");
     }
+    if (activeDocument.type === "json") {
+      throw new Error("JSON updates must be reviewed in the JSON editor. Use review cards to propose targeted JSON changes, then edit the raw JSON directly.");
+    }
 
     const baseInput = {
       projectPath,
@@ -870,10 +865,7 @@ export default function ProjectWorkspace() {
     setBusy(true);
     setResolveBusy(true);
     try {
-      const nextMarkdown =
-        resolveKind === "patch"
-          ? await buildDocumentUpdate(trimmed, "note")
-          : applyResolutionToDocument(documentMarkdown, resolveKind, trimmed);
+      const nextMarkdown = await resolveNextDocumentMarkdown(trimmed);
       await projectStore.saveDocument(projectPath, activeDocument.id, nextMarkdown);
       setDocumentMarkdown(nextMarkdown);
       if (resolveKind === "decision") {
@@ -893,17 +885,43 @@ export default function ProjectWorkspace() {
     }
   }
 
+  async function resolveNextDocumentMarkdown(trimmed: string) {
+    if (!activeDocument) {
+      throw new Error("Select a document before resolving a card.");
+    }
+
+    if (activeDocument.type === "json") {
+      if (resolveKind !== "patch") {
+        throw new Error("JSON cards can only be resolved with a reviewed JSON replacement. Use Edit mode for decisions or open questions.");
+      }
+      const parsed = parseJsonDocument(trimmed);
+      if (!parsed.ok) {
+        throw new Error(`Replacement JSON is invalid: ${parsed.error}`);
+      }
+      return JSON.stringify(parsed.value, null, 2);
+    }
+
+    return resolveKind === "patch"
+      ? await buildDocumentUpdate(trimmed, "note")
+      : applyResolutionToDocument(documentMarkdown, resolveKind, trimmed);
+  }
+
   return (
     <div
       className={
         "workspace armWorkspace" +
-        (navCollapsed ? " navCollapsed" : "") +
+        (!leftNavOpen ? " leftNavCompact" : "") +
         (!rightRailOpen ? " rightRailCompact" : "")
       }
-      style={{ "--right-rail-width": `${rightRailWidth}px` } as React.CSSProperties}
+      style={
+        {
+          "--left-nav-width": `${leftNavWidth}px`,
+          "--right-rail-width": `${rightRailWidth}px`,
+        } as React.CSSProperties
+      }
     >
       <WorkspaceSidebar
-        navCollapsed={navCollapsed}
+        open={leftNavOpen}
         projectName={projectName}
         projectPath={projectPath}
         currentView={currentView}
@@ -915,11 +933,18 @@ export default function ProjectWorkspace() {
         decisions={decisions}
         stickyNotes={stickyNotes}
         busy={busy}
-        onToggleCollapsed={() => setNavCollapsed((value) => !value)}
+        onResizeStart={(event) => {
+          draggingLeftNav.current = true;
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onOpen={() => setLeftNavWidth(260)}
+        onToggleOpen={() => setLeftNavWidth(leftNavOpen ? 40 : 260)}
         onNavigate={navigate}
         onAddDocument={() => documentWorkflow.setAddDocumentOpen(true)}
         onDeleteDiagram={(document) => void documentWorkflow.deleteDiagramNow(document)}
+        onDeleteIdea={(document) => void documentWorkflow.deleteIdeaNow(document)}
         onDeletePrd={(document) => void documentWorkflow.deletePrdNow(document)}
+        onDeleteJson={(document) => void documentWorkflow.deleteJsonNow(document)}
         onDeletePlan={(document) => void documentWorkflow.deletePlanNow(document)}
       />
 
@@ -956,7 +981,13 @@ export default function ProjectWorkspace() {
             onCodeEditingChange: setDiagramCodeEditing,
             onSaveCode: () => void saveDiagramCodeNow(),
             onOpenAddCard: openAddDiagramCard,
-            onCopy: () => void copyDiagramMermaidNow(),
+            onCopy: copyDiagramMermaidNow,
+          }}
+          jsonDocument={{
+            content: documentMarkdown,
+            busy,
+            onContentChange: setDocumentMarkdown,
+            onCopy: documentWorkflow.copyDocumentNow,
           }}
           plan={{
             markdown: documentMarkdown,
@@ -968,7 +999,7 @@ export default function ProjectWorkspace() {
             onDelete: (document) => void documentWorkflow.deletePlanNow(document),
             onRerun: rerunPlan,
             onGenerateScrumReview: () => void generateScrumReviewAudioNow(),
-            onCopy: () => void documentWorkflow.copyDocumentNow(),
+            onCopy: documentWorkflow.copyDocumentNow,
           }}
           markdownDocument={{
             document: activeDocument,
@@ -982,7 +1013,7 @@ export default function ProjectWorkspace() {
             onOpenPlanning: openPlanning,
             onMarkdownChange: setDocumentMarkdown,
             onEditingChange: setDocumentMarkdownEditing,
-            onCopy: () => void documentWorkflow.copyDocumentNow(),
+            onCopy: documentWorkflow.copyDocumentNow,
             isPlanningSourceDocument,
           }}
           context={{
@@ -994,7 +1025,7 @@ export default function ProjectWorkspace() {
             onOpenUpdate: () => setUpdateOpen(true),
             onOpenPlanning: openPlanning,
             onMarkdownChange: setDocumentMarkdown,
-            onCopy: () => void documentWorkflow.copyDocumentNow(),
+            onCopy: documentWorkflow.copyDocumentNow,
           }}
         />
       </section>
@@ -1286,12 +1317,6 @@ export default function ProjectWorkspace() {
             {resolveStatus ? <div className="status">{resolveStatus}</div> : null}
           </div>
         </Modal>
-      ) : null}
-
-      {copyToastVisible ? (
-        <div className="copyToast" role="status" aria-live="polite">
-          Copied!
-        </div>
       ) : null}
 
       {errorModalMessage ? (

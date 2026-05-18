@@ -1,6 +1,7 @@
 import { ProjectDocument } from "../../core/projectStore";
+import CopyFeedbackButton from "./CopyFeedbackButton";
 import MarkdownReader from "./MarkdownReader";
-import { CopyIcon, EyeIcon, LightningIcon, MegaphoneIcon, PencilIcon, PlusIcon } from "./ProjectIcons";
+import { EyeIcon, LightningIcon, MegaphoneIcon, PencilIcon, PlusIcon } from "./ProjectIcons";
 import { FocusFrame } from "./WorkspaceShell";
 
 export type MarkdownDocumentViewProps = {
@@ -15,7 +16,7 @@ export type MarkdownDocumentViewProps = {
   onOpenPlanning: () => void;
   onMarkdownChange: (value: string) => void;
   onEditingChange: (editing: boolean) => void;
-  onCopy: () => void;
+  onCopy: () => Promise<boolean>;
   isPlanningSourceDocument: (document: ProjectDocument | null, markdown: string) => boolean;
 };
 
@@ -95,7 +96,7 @@ export type ContextDocumentViewProps = {
   onOpenUpdate: () => void;
   onOpenPlanning: () => void;
   onMarkdownChange: (value: string) => void;
-  onCopy: () => void;
+  onCopy: () => Promise<boolean>;
 };
 
 export function ContextDocumentView(props: ContextDocumentViewProps) {
@@ -129,9 +130,7 @@ export function ContextDocumentView(props: ContextDocumentViewProps) {
           >
             <LightningIcon />
           </button>
-          <button type="button" className="iconButton" title="Copy document" aria-label="Copy document" disabled={!props.document} onClick={props.onCopy}>
-            <CopyIcon />
-          </button>
+          <CopyFeedbackButton title="Copy document" ariaLabel="Copy document" disabled={!props.document} onCopy={props.onCopy} />
         </div>
       }
     >
@@ -158,14 +157,12 @@ export function ContextDocumentView(props: ContextDocumentViewProps) {
 function DocumentReadEditActions(props: {
   disabled: boolean;
   editing: boolean;
-  onCopy: () => void;
+  onCopy: () => Promise<boolean>;
   onEditingChange: (editing: boolean) => void;
 }) {
   return (
     <>
-      <button type="button" className="iconButton" title="Copy document" aria-label="Copy document" disabled={props.disabled} onClick={props.onCopy}>
-        <CopyIcon />
-      </button>
+      <CopyFeedbackButton title="Copy document" ariaLabel="Copy document" disabled={props.disabled} onCopy={props.onCopy} />
       <button
         type="button"
         className={"iconButton" + (props.editing ? " active" : "")}

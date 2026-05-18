@@ -1,4 +1,5 @@
 import { getApiKey, loadLlmSettings } from "./llmSettings";
+import { summarizeJsonDocument } from "./jsonDocument";
 import { projectStore } from "./projectStore";
 import { generalChatPersona, personaForMode, ReviewPersonaMode } from "./reviewPersonas";
 import {
@@ -278,13 +279,9 @@ function buildChatPayload(input: {
         createdAt: message.createdAt,
       })),
       activeDocument: input.activeDocument
-        ? {
-            name: input.activeDocument.name,
-            type: input.activeDocument.type,
-            markdown: input.activeDocument.markdown,
-          }
+        ? documentForPayload(input.activeDocument)
         : null,
-      currentContext: input.currentContext,
+      currentContext: contextForPayload(input.activeDocument, input.currentContext),
       recentNotes: input.notes.slice(0, 8).map((note) => note.text),
       recentDecisions: input.decisions.slice(0, 8).map((decision) => ({
         text: decision.text,
@@ -362,13 +359,9 @@ function buildReviewPayload(input: ReviewRequest, retrievedContext: RetrievedMem
       reviewMode: input.mode,
       prompt: input.prompt,
       activeDocument: input.activeDocument
-        ? {
-            name: input.activeDocument.name,
-            type: input.activeDocument.type,
-            markdown: input.activeDocument.markdown,
-          }
+        ? documentForPayload(input.activeDocument)
         : null,
-      currentContext: input.currentContext,
+      currentContext: contextForPayload(input.activeDocument, input.currentContext),
       recentNotes: input.notes.slice(0, 8).map((note) => note.text),
       recentDecisions: input.decisions.slice(0, 8).map((decision) => ({
         text: decision.text,
@@ -431,13 +424,9 @@ function buildDocumentUpdatePayload(input: {
       updateKind: input.kind,
       updateText: input.updateText,
       activeDocument: input.activeDocument
-        ? {
-            name: input.activeDocument.name,
-            type: input.activeDocument.type,
-            markdown: input.activeDocument.markdown,
-          }
+        ? documentForPayload(input.activeDocument)
         : null,
-      currentContext: input.currentContext,
+      currentContext: contextForPayload(input.activeDocument, input.currentContext),
       recentNotes: input.notes.slice(0, 8).map((note) => note.text),
       recentDecisions: input.decisions.slice(0, 8).map((decision) => ({
         text: decision.text,
@@ -502,7 +491,7 @@ function buildPlanPayload(input: {
       sourceDocuments: input.documents.map((document) => ({
         title: document.name,
         type: document.type,
-        markdown: truncateForPayload(document.markdown, 10000),
+        ...documentContentForPayload(document, 10000),
       })),
       acceptedCards: input.cards.map((card) => ({
         type: card.type,
@@ -855,6 +844,40 @@ function normalizeOptionalString(value: unknown) {
 function truncateForPayload(value: string, maxChars: number) {
   if (value.length <= maxChars) return value;
   return `${value.slice(0, maxChars)}\n\n[Truncated for planning context]`;
+}
+
+function documentForPayload(document: ProjectDocument) {
+  return {
+    name: document.name,
+    type: document.type,
+    ...documentContentForPayload(document, 8000),
+  };
+}
+
+function documentContentForPayload(document: ProjectDocument, maxRawChars: number) {
+  if (document.type !== "json") {
+    return { markdown: truncateForPayload(document.markdown, maxRawChars) };
+  }
+
+  const summary = summarizeJsonDocument(document.markdown, maxRawChars);
+  return {
+    contentType: "JSON",
+    markdown: summary.raw || summary.summary,
+    rawJson: summary.raw,
+    jsonSummary: summary.summary,
+    validationWarnings: summary.warnings,
+    jsonRules: [
+      "JSON is the source of truth.",
+      "Do not silently rewrite JSON.",
+      "When suggesting changes, describe a proposed replacement or targeted edit for user review.",
+    ],
+  };
+}
+
+function contextForPayload(activeDocument: ProjectDocument | null, currentContext: string) {
+  if (activeDocument?.type !== "json") return currentContext;
+  const summary = summarizeJsonDocument(currentContext, 8000);
+  return summary.raw || summary.summary;
 }
 
 function repairPlanMermaidLabels(markdown: string) {

@@ -48,7 +48,7 @@ select {
 .shell {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -130,6 +130,34 @@ select {
   border-color: var(--ink);
 }
 
+.apiKeyBannerSlot:empty {
+  display: none;
+}
+
+.apiKeyBanner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border-bottom: 1px solid #d98b25;
+  background: #ffe0ad;
+  color: #5d3506;
+  padding: 10px 18px;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.apiKeyBannerButton {
+  flex: 0 0 auto;
+  border-color: #8c520b;
+  background: #8c520b;
+  color: #fff;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .menu {
   position: relative;
 }
@@ -195,13 +223,9 @@ button:disabled {
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) var(--right-rail-width, 420px);
+  grid-template-columns: var(--left-nav-width, 260px) minmax(0, 1fr) var(--right-rail-width, 420px);
   grid-template-rows: minmax(0, 1fr) auto;
   overflow: hidden;
-}
-
-.armWorkspace.navCollapsed {
-  grid-template-columns: 56px minmax(420px, 1fr) var(--right-rail-width, 420px);
 }
 
 .navPane,
@@ -214,12 +238,37 @@ button:disabled {
   border-right: 1px solid var(--line);
   background: rgba(255, 251, 244, 0.56);
   overflow: hidden;
+  position: relative;
 }
 
 .workspaceSidebar {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 12px;
+}
+
+.leftNavCompact .navPane {
+  padding: 12px 8px;
+  justify-items: center;
+  grid-template-rows: auto;
+}
+
+.leftNavResizeHandle {
+  position: absolute;
+  right: -4px;
+  top: 0;
+  width: 8px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.leftNavResizeHandle:hover {
+  background: rgba(29, 27, 23, 0.08);
+}
+
+.leftNavOpenButton {
+  justify-self: center;
 }
 
 .focusPane {
@@ -1106,8 +1155,16 @@ button:disabled {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.segmentedControl.documentKindBar,
 .segmentedControl.diagramModeBar {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.segmentedControl.documentKindBar,
+.segmentedControl.jsonModeTabs {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.segmentedControl.jsonModeTabs:has(.segmentedPill:nth-child(2):last-child) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
@@ -1115,13 +1172,175 @@ button:disabled {
 .segmentedControl.sidebarActionBar .segmentedPill,
 .segmentedControl.resolveActionBar .segmentedPill,
 .segmentedControl.documentKindBar .segmentedPill,
-.segmentedControl.diagramModeBar .segmentedPill {
+.segmentedControl.diagramModeBar .segmentedPill,
+.segmentedControl.jsonModeTabs .segmentedPill {
   min-width: 0;
   min-height: 30px;
   padding: 6px 4px;
   font-size: 12px;
   line-height: 1;
   white-space: nowrap;
+}
+
+.segmentedControl.documentKindBar .segmentedPill,
+.segmentedControl.jsonModeTabs .segmentedPill {
+  border-top: 0;
+  border-right: 1px solid var(--line);
+}
+
+.segmentedControl.documentKindBar .segmentedPill:last-child,
+.segmentedControl.jsonModeTabs .segmentedPill:last-child {
+  border-right: 0;
+}
+
+.jsonDocument {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+}
+
+.jsonFormatButton {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.jsonValidationError,
+.jsonWarnings {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.jsonStatusSlot:empty {
+  display: none;
+}
+
+.jsonValidationError {
+  border-color: #b25a46;
+  background: #fff1ed;
+  color: #8f2f21;
+}
+
+.jsonWarnings {
+  background: var(--warning-bg);
+  color: var(--warning-fg);
+}
+
+.jsonEditor {
+  min-height: 360px;
+}
+
+.jsonTree,
+.jsonGraphViewport {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.jsonTree {
+  padding: 12px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.jsonTreeNode {
+  margin: 3px 0;
+}
+
+.jsonTreeNode summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.jsonTreeChildren {
+  margin-left: 18px;
+  border-left: 1px solid var(--line);
+  padding-left: 12px;
+}
+
+.jsonTreeLeaf {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.jsonTreeKey {
+  color: var(--info-fg);
+  font-weight: 700;
+}
+
+.jsonTreeMeta,
+.jsonTreeValue {
+  color: var(--muted);
+}
+
+.jsonGraphViewport {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  place-items: stretch;
+}
+
+.jsonGraphSvg {
+  width: 100%;
+  min-width: 640px;
+  height: 100%;
+  min-height: 420px;
+}
+
+.jsonGraphEdge line {
+  stroke: var(--line-strong);
+  stroke-width: 1.8;
+}
+
+.jsonGraphEdge-contains line {
+  stroke-dasharray: 5 4;
+}
+
+.jsonGraphEdge-references line {
+  stroke: var(--info-fg);
+}
+
+.jsonGraphEdge marker path {
+  fill: var(--line-strong);
+}
+
+.jsonGraphEdge text {
+  fill: var(--muted);
+  font-family: "Segoe UI", sans-serif;
+  font-size: 12px;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 4px;
+}
+
+.jsonGraphNode circle {
+  fill: var(--panel-strong);
+  stroke: var(--ink);
+  stroke-width: 1.5;
+}
+
+.jsonGraphNode text {
+  text-anchor: middle;
+  font-family: "Segoe UI", sans-serif;
+}
+
+.jsonGraphNodeLabel {
+  fill: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.jsonGraphNodeType {
+  fill: var(--muted);
+  font-size: 11px;
 }
 
 .planSourceList {
@@ -1980,22 +2199,6 @@ button.secondary {
   color: #fff;
 }
 
-.copyToast {
-  position: fixed;
-  left: 18px;
-  bottom: 18px;
-  z-index: 220;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--ink);
-  color: #fff;
-  box-shadow: var(--shadow);
-  padding: 10px 12px;
-  font-family: "Segoe UI", sans-serif;
-  font-size: 13px;
-  font-weight: 700;
-}
-
 .dangerIconButton {
   border-color: #b25a46;
   color: #8f2f21;
@@ -2026,9 +2229,8 @@ button.secondary {
 
 @media (max-width: 1100px) {
   .workspace,
-  .armWorkspace,
-  .armWorkspace.navCollapsed {
-    grid-template-columns: 220px minmax(0, 1fr);
+  .armWorkspace {
+    grid-template-columns: minmax(40px, var(--left-nav-width, 220px)) minmax(0, 1fr);
   }
 
   .inputPane {
@@ -2049,8 +2251,7 @@ button.secondary {
   }
 
   .workspace,
-  .armWorkspace,
-  .armWorkspace.navCollapsed {
+  .armWorkspace {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr) auto auto;
   }

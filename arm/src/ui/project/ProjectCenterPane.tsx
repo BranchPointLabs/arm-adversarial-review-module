@@ -1,6 +1,7 @@
 import { ProjectDocument } from "../../core/projectStore";
 import DiagramDocumentView, { DiagramDocumentViewProps } from "./DiagramDocumentView";
 import { ContextDocumentView, ContextDocumentViewProps, MarkdownDocumentView, MarkdownDocumentViewProps } from "./DocumentViews";
+import JsonDocumentEditor from "./JsonDocumentEditor";
 import PlanDocumentView, { PlanDocumentViewProps } from "./PlanDocumentView";
 import { DecisionsView, NotesView } from "./ProjectActivityViews";
 import ReferencesView, { ReferencesViewProps } from "./ReferencesView";
@@ -14,6 +15,12 @@ export default function ProjectCenterPane(props: {
   decisions: Parameters<typeof DecisionsView>[0];
   references: ReferencesViewProps;
   diagram: Omit<DiagramDocumentViewProps, "document">;
+  jsonDocument: {
+    content: string;
+    busy: boolean;
+    onContentChange: (value: string) => void;
+    onCopy: () => Promise<boolean>;
+  };
   plan: Omit<PlanDocumentViewProps, "document">;
   markdownDocument: MarkdownDocumentViewProps;
   context: ContextDocumentViewProps;
@@ -35,11 +42,19 @@ export default function ProjectCenterPane(props: {
       return <DiagramDocumentView {...props.diagram} document={props.activeDocument} />;
     }
 
+    if (props.activeDocument?.type === "json") {
+      return <JsonDocumentEditor {...props.jsonDocument} document={props.activeDocument} />;
+    }
+
     if (props.activeDocument?.type === "PLAN") {
       return <PlanDocumentView {...props.plan} document={props.activeDocument} />;
     }
 
     return <MarkdownDocumentView {...props.markdownDocument} />;
+  }
+
+  if (props.activeDocument?.type === "json") {
+    return <JsonDocumentEditor {...props.jsonDocument} document={props.activeDocument} />;
   }
 
   return <ContextDocumentView {...props.context} />;

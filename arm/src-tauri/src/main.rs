@@ -2049,6 +2049,10 @@ fn default_document_markdown(name: &str, document_type: &str) -> String {
     return ensure_trailing_newline(&format!("# {}\n\nNo diagram entities yet.", name));
   }
 
+  if document_type == "json" {
+    return ensure_trailing_newline("{\n  \"entities\": [],\n  \"relationships\": []\n}");
+  }
+
   if document_type == "PLAN" {
     return ensure_trailing_newline(&format!(
       "# {}\n\n## Plan Summary\n**Plan type:** Draft plan\n**Business outcome:** \n**Delivery constraint:** \n**Decision signal:** \n\n## Initiatives\n### Initiative 1\n- **Source:** \n- **Why:** \n- **Action:** \n- **Success signal:** \n\n## QA Review\n### QA Objective\n**Decision signal:** \n\n### End-to-End Test Scenarios\n- \n\n### Ticket Acceptance Matrix\n- \n\n## Decision After Execution\n- [ ] **Proceed:** \n- [ ] **Iterate:** \n- [ ] **Kill:** \n",
@@ -2070,10 +2074,10 @@ fn default_document_markdown(name: &str, document_type: &str) -> String {
 }
 
 fn validate_document_type(document_type: &str) -> Result<(), String> {
-  if document_type == "IDEA" || document_type == "PRD" || document_type == "PLAN" || document_type == "diagram" {
+  if document_type == "IDEA" || document_type == "PRD" || document_type == "PLAN" || document_type == "diagram" || document_type == "json" {
     return Ok(());
   }
-  Err("Document type must be IDEA, PRD, PLAN, or diagram.".into())
+  Err("Document type must be IDEA, PRD, PLAN, diagram, or json.".into())
 }
 
 fn normalize_diagram_entities(entities: Vec<DiagramEntityInput>) -> Vec<DiagramEntityInput> {

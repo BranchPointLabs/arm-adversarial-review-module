@@ -27,7 +27,7 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL,
       name TEXT NOT NULL,
-      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN', 'diagram')),
+      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN', 'diagram', 'json')),
       markdown TEXT NOT NULL,
       diagram_entities TEXT NOT NULL DEFAULT '[]',
       mermaid TEXT NOT NULL DEFAULT 'flowchart LR',
@@ -118,6 +118,7 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     "ALTER TABLE documents ADD COLUMN mermaid TEXT NOT NULL DEFAULT 'flowchart LR'",
     [],
   );
+  migrate_documents_json_type(conn)?;
 
   let has_selected = conn
     .prepare("SELECT is_selected FROM project_references LIMIT 1")
@@ -155,6 +156,40 @@ pub fn init_schema(conn: &Connection) -> rusqlite::Result<()> {
     "ALTER TABLE agent_cards ADD COLUMN source_section_title TEXT",
     [],
   );
+
+  Ok(())
+}
+
+fn migrate_documents_json_type(conn: &Connection) -> rusqlite::Result<()> {
+  let table_sql: String = conn.query_row(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='documents'",
+    [],
+    |row| row.get(0),
+  )?;
+
+  if table_sql.contains("'json'") {
+    return Ok(());
+  }
+
+  conn.execute_batch(
+    r#"
+    ALTER TABLE documents RENAME TO documents_old;
+    CREATE TABLE documents (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      document_type TEXT NOT NULL CHECK(document_type IN ('IDEA', 'PRD', 'PLAN', 'diagram', 'json')),
+      markdown TEXT NOT NULL,
+      diagram_entities TEXT NOT NULL DEFAULT '[]',
+      mermaid TEXT NOT NULL DEFAULT 'flowchart LR',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    INSERT INTO documents (id, project_id, name, document_type, markdown, diagram_entities, mermaid, created_at, updated_at)
+      SELECT id, project_id, name, document_type, markdown, diagram_entities, mermaid, created_at, updated_at FROM documents_old;
+    DROP TABLE documents_old;
+    "#,
+  )?;
 
   Ok(())
 }

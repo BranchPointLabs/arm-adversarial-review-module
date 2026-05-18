@@ -1,7 +1,8 @@
 import { PlanPage, buildPlanPages } from "../../core/planPages";
 import { ProjectDocument } from "../../core/projectStore";
+import CopyFeedbackButton from "./CopyFeedbackButton";
 import PlanFolderView from "./PlanFolderView";
-import { CopyIcon, LightningIcon, MegaphoneIcon, TrashIcon } from "./ProjectIcons";
+import { LightningIcon, MegaphoneIcon, TrashIcon } from "./ProjectIcons";
 import { FocusFrame } from "./WorkspaceShell";
 
 export type PlanDocumentViewProps = {
@@ -15,7 +16,7 @@ export type PlanDocumentViewProps = {
   onDelete: (document: ProjectDocument) => void;
   onRerun: (document: ProjectDocument) => void;
   onGenerateScrumReview: () => void;
-  onCopy: () => void;
+  onCopy: () => Promise<boolean>;
 };
 
 export default function PlanDocumentView(props: PlanDocumentViewProps) {
@@ -57,9 +58,7 @@ export default function PlanDocumentView(props: PlanDocumentViewProps) {
           >
             <MegaphoneIcon />
           </button>
-          <button type="button" className="iconButton" title="Copy plan" aria-label="Copy plan" onClick={props.onCopy}>
-            <CopyIcon />
-          </button>
+          <CopyFeedbackButton title="Copy plan" ariaLabel="Copy plan" onCopy={props.onCopy} />
         </div>
       }
     >

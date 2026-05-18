@@ -16,13 +16,12 @@ export function useDocumentWorkflow(props: {
   setDiagramMermaidDraft: (markdown: string) => void;
   setDiagramCodeEditing: (editing: boolean) => void;
   setPlanGenerating: (generating: boolean) => void;
-  onCopySuccess: () => void;
   refreshAll: () => Promise<void>;
   navigate: (path: string) => void;
 }) {
   const [addDocumentOpen, setAddDocumentOpen] = React.useState(false);
   const [newDocumentName, setNewDocumentName] = React.useState("");
-  const [newDocumentKind, setNewDocumentKind] = React.useState<"text" | "diagram">("text");
+  const [newDocumentKind, setNewDocumentKind] = React.useState<"text" | "diagram" | "json">("text");
   const [newDocumentType, setNewDocumentType] = React.useState<DocumentType>("IDEA");
   const [newDocumentStatus, setNewDocumentStatus] = React.useState<string | null>(null);
 
@@ -102,7 +101,21 @@ export function useDocumentWorkflow(props: {
 
   async function deletePrdNow(document: ProjectDocument) {
     if (document.type !== "PRD") return;
-    const confirmed = window.confirm(`Delete PRD "${document.name}"?`);
+    await deleteDocumentNow(document, "PRD", "PRD deleted.");
+  }
+
+  async function deleteIdeaNow(document: ProjectDocument) {
+    if (document.type !== "IDEA") return;
+    await deleteDocumentNow(document, "idea", "Idea deleted.");
+  }
+
+  async function deleteJsonNow(document: ProjectDocument) {
+    if (document.type !== "json") return;
+    await deleteDocumentNow(document, "JSON document", "JSON document deleted.");
+  }
+
+  async function deleteDocumentNow(document: ProjectDocument, label: string, successMessage: string) {
+    const confirmed = window.confirm(`Delete ${label} "${document.name}"?`);
     if (!confirmed) return;
 
     props.setBusy(true);
@@ -112,7 +125,7 @@ export function useDocumentWorkflow(props: {
       props.setDocumentMarkdown("");
       await props.refreshAll();
       props.navigate(`/p/${encodeURIComponent(props.projectPath)}/context`);
-      props.setStatus("PRD deleted.");
+      props.setStatus(successMessage);
     } catch (error: any) {
       props.setStatus(typeof error === "string" ? error : error?.message || "Delete failed.");
     } finally {
@@ -121,12 +134,13 @@ export function useDocumentWorkflow(props: {
   }
 
   async function copyDocumentNow() {
-    if (!props.activeDocument) return;
+    if (!props.activeDocument) return false;
     try {
       await navigator.clipboard.writeText(props.documentMarkdown);
-      props.onCopySuccess();
+      return true;
     } catch (error: any) {
       props.setErrorModalMessage(typeof error === "string" ? error : error?.message || "Copy failed.");
+      return false;
     }
   }
 
@@ -139,7 +153,7 @@ export function useDocumentWorkflow(props: {
 
     props.setBusy(true);
     try {
-      const documentType = newDocumentKind === "diagram" ? "diagram" : newDocumentType;
+      const documentType = newDocumentKind === "diagram" ? "diagram" : newDocumentKind === "json" ? "json" : newDocumentType;
       const document = await projectStore.createDocument(props.projectPath, trimmed, documentType);
       setAddDocumentOpen(false);
       setNewDocumentName("");
@@ -170,7 +184,9 @@ export function useDocumentWorkflow(props: {
     savePlanPageNow,
     deletePlanNow,
     deleteDiagramNow,
+    deleteIdeaNow,
     deletePrdNow,
+    deleteJsonNow,
     copyDocumentNow,
     createDocument,
   };

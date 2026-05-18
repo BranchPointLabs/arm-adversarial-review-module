@@ -4,13 +4,13 @@ import Modal from "../shared/Modal";
 export default function AddDocumentModal(props: {
   busy: boolean;
   name: string;
-  kind: "text" | "diagram";
+  kind: "text" | "diagram" | "json";
   type: DocumentType;
   status: string | null;
   onClose: () => void;
   onCreate: () => void;
   onNameChange: (value: string) => void;
-  onKindChange: (kind: "text" | "diagram") => void;
+  onKindChange: (kind: "text" | "diagram" | "json") => void;
   onTypeChange: (type: DocumentType) => void;
 }) {
   return (
@@ -30,14 +30,14 @@ export default function AddDocumentModal(props: {
     >
       <div className="stack">
         <div className="segmentedControl documentKindBar">
-          {(["text", "diagram"] as const).map((kind) => (
+          {(["text", "diagram", "json"] as const).map((kind) => (
             <button
               key={kind}
               type="button"
               className={"segmentedPill" + (props.kind === kind ? " active" : "")}
               onClick={() => props.onKindChange(kind)}
             >
-              {kind === "text" ? "Text" : "Diagram"}
+              {kind === "text" ? "Markdown" : kind === "diagram" ? "Diagram" : "JSON"}
             </button>
           ))}
         </div>

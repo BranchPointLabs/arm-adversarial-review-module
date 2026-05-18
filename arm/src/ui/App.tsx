@@ -31,6 +31,23 @@ export default function App() {
   const [settingsBusy, setSettingsBusy] = React.useState(false);
   const [hasOpenAiKey, setHasOpenAiKey] = React.useState(() => hasSavedApiKey("openai"));
   const [hasAnthropicKey, setHasAnthropicKey] = React.useState(() => hasSavedApiKey("anthropic"));
+  const selectedProviderHasKey = llmProvider === "openai" ? hasOpenAiKey : hasAnthropicKey;
+
+  React.useEffect(() => {
+    refreshApiKeyState();
+
+    function onStorage() {
+      refreshApiKeyState();
+    }
+
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  function refreshApiKeyState() {
+    setHasOpenAiKey(hasSavedApiKey("openai"));
+    setHasAnthropicKey(hasSavedApiKey("anthropic"));
+  }
 
   async function onCreateProject() {
     const trimmed = createName.trim();
@@ -59,8 +76,7 @@ export default function App() {
     setModelByProvider(current.modelByProvider);
     setApiKeyInput("");
     setSettingsStatus(null);
-    setHasOpenAiKey(hasSavedApiKey("openai"));
-    setHasAnthropicKey(hasSavedApiKey("anthropic"));
+    refreshApiKeyState();
     setSettingsOpen(true);
   }
 
@@ -89,8 +105,7 @@ export default function App() {
       saveLlmSettings({ provider: llmProvider, modelByProvider });
       await saveApiKey(llmProvider, trimmed);
       setApiKeyInput("");
-      setHasOpenAiKey(hasSavedApiKey("openai"));
-      setHasAnthropicKey(hasSavedApiKey("anthropic"));
+      refreshApiKeyState();
       setSettingsStatus(`Saved ${providerLabel(llmProvider)} key.`);
     } catch (e: any) {
       setSettingsStatus(typeof e === "string" ? e : e?.message || "Save failed.");
@@ -104,8 +119,7 @@ export default function App() {
     setSettingsStatus(null);
     try {
       await deleteAllApiKeys();
-      setHasOpenAiKey(false);
-      setHasAnthropicKey(false);
+      refreshApiKeyState();
       setApiKeyInput("");
       setSettingsStatus("Deleted all saved keys.");
     } catch (e: any) {
@@ -131,6 +145,8 @@ export default function App() {
             </button>
           </div>
         </header>
+
+        <div className="apiKeyBannerSlot" />
 
         <main className="desktopOnlyState">
           <div className="desktopOnlyCard">
@@ -176,6 +192,20 @@ export default function App() {
           </nav>
         </div>
       </header>
+
+      <div className="apiKeyBannerSlot">
+        {!selectedProviderHasKey ? (
+          <div className="apiKeyBanner" role="status" aria-live="polite">
+            <div>
+              <strong>No {providerLabel(llmProvider)} API key saved.</strong>
+              <span> Add a key before running review, chat, planning, or document update actions.</span>
+            </div>
+            <button type="button" className="apiKeyBannerButton" onClick={openLlmSettings}>
+              Add Key
+            </button>
+          </div>
+        ) : null}
+      </div>
 
       {createOpen ? (
         <Modal
