@@ -36,6 +36,7 @@ export default function JsonDocumentEditor(props: {
     <FocusFrame
       title={props.document.name}
       description="JSON document"
+      bodyClassName="focusFrameBodyFill"
       actions={
         <div className="row">
           <button
@@ -65,36 +66,37 @@ export default function JsonDocumentEditor(props: {
             </button>
           ))}
         </div>
-
-        <div className="jsonStatusSlot">
-          {!parsed.ok ? <div className="jsonValidationError">Invalid JSON: {parsed.error}</div> : null}
-          {parsed.ok && graph?.warnings.length ? (
-            <div className="jsonWarnings">
-              {graph.warnings.map((warning) => (
-                <div key={warning}>{warning}</div>
-              ))}
-            </div>
-          ) : null}
-        </div>
-
-        {mode === "edit" ? (
-          <textarea
-            className="documentEditor jsonEditor"
-            value={props.content}
-            onChange={(event) => props.onContentChange(event.target.value)}
-            disabled={props.busy}
-            spellCheck={false}
-          />
-        ) : !parsed.ok ? (
-          <div className="emptyContextState">
-            <div className="surfaceTitle">JSON cannot be rendered</div>
-            <div className="surfaceCopy">Fix the validation error in Edit mode before using derived views.</div>
+        <div className="jsonViewportShell">
+          <div className="jsonStatusSlot">
+            {!parsed.ok ? <div className="jsonValidationError">Invalid JSON: {parsed.error}</div> : null}
+            {parsed.ok && graph?.warnings.length ? (
+              <div className="jsonWarnings">
+                {graph.warnings.map((warning) => (
+                  <div key={warning}>{warning}</div>
+                ))}
+              </div>
+            ) : null}
           </div>
-        ) : mode === "tree" || !graph?.hasExplicitSchema ? (
-          <JsonTreeView value={parsed.value} />
-        ) : (
-          <JsonGraphView graph={graph} />
-        )}
+
+          {mode === "edit" ? (
+            <textarea
+              className="documentEditor jsonEditor"
+              value={props.content}
+              onChange={(event) => props.onContentChange(event.target.value)}
+              disabled={props.busy}
+              spellCheck={false}
+            />
+          ) : !parsed.ok ? (
+            <div className="emptyContextState">
+              <div className="surfaceTitle">JSON cannot be rendered</div>
+              <div className="surfaceCopy">Fix the validation error in Edit mode before using derived views.</div>
+            </div>
+          ) : mode === "tree" || !graph?.hasExplicitSchema ? (
+            <JsonTreeView value={parsed.value} />
+          ) : (
+            <JsonGraphView graph={graph} />
+          )}
+        </div>
       </div>
     </FocusFrame>
   );

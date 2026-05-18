@@ -16,6 +16,7 @@
   --action-bg: #e7f6ee;
   --action-fg: #245b3c;
   --shadow: 0 20px 60px rgba(31, 24, 14, 0.12);
+  --document-viewport-min-height: 560px;
 }
 
 * {
@@ -280,6 +281,9 @@ button:disabled {
 
 .workspaceFocus {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  align-items: stretch;
 }
 
 .documentNav {
@@ -1197,7 +1201,16 @@ button:disabled {
   min-height: 0;
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  align-self: stretch;
+}
+
+.jsonViewportShell {
+  min-height: 0;
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -1232,12 +1245,22 @@ button:disabled {
 }
 
 .jsonEditor {
-  min-height: 360px;
+  min-height: var(--document-viewport-min-height);
+}
+
+.jsonViewportShell > .documentEditor,
+.jsonViewportShell > .jsonTree,
+.jsonViewportShell > .jsonGraphViewport,
+.jsonViewportShell > .emptyContextState {
+  min-height: var(--document-viewport-min-height);
+  height: auto;
+  align-self: stretch;
 }
 
 .jsonTree,
 .jsonGraphViewport {
   min-height: 0;
+  height: 100%;
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -1530,6 +1553,7 @@ button:disabled {
 
 .focusFrame {
   min-height: 0;
+  height: 100%;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
@@ -1554,6 +1578,18 @@ button:disabled {
   min-height: 0;
   display: grid;
   gap: 12px;
+}
+
+.focusFrameBodyFill {
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.focusFrameBodyFill > * {
+  min-height: 0;
+  height: 100%;
 }
 
 .emptyContextState {

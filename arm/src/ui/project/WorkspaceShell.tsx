@@ -12,6 +12,7 @@ export function FocusFrame(props: {
   title: string;
   description: string;
   actions?: React.ReactNode;
+  bodyClassName?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -23,7 +24,7 @@ export function FocusFrame(props: {
         </div>
         {props.actions ? <div className="focusActions">{props.actions}</div> : null}
       </div>
-      <div className="focusFrameBody">{props.children}</div>
+      <div className={"focusFrameBody" + (props.bodyClassName ? ` ${props.bodyClassName}` : "")}>{props.children}</div>
     </div>
   );
 }
