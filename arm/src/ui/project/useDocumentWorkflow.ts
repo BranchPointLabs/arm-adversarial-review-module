@@ -16,6 +16,7 @@ export function useDocumentWorkflow(props: {
   setDiagramMermaidDraft: (markdown: string) => void;
   setDiagramCodeEditing: (editing: boolean) => void;
   setPlanGenerating: (generating: boolean) => void;
+  onCopySuccess: () => void;
   refreshAll: () => Promise<void>;
   navigate: (path: string) => void;
 }) {
@@ -123,7 +124,7 @@ export function useDocumentWorkflow(props: {
     if (!props.activeDocument) return;
     try {
       await navigator.clipboard.writeText(props.documentMarkdown);
-      props.setStatus("Document copied.");
+      props.onCopySuccess();
     } catch (error: any) {
       props.setErrorModalMessage(typeof error === "string" ? error : error?.message || "Copy failed.");
     }

@@ -65,26 +65,20 @@ export default function PlanFolderView(props: {
               <div className="row">
                 <button
                   type="button"
-                  className={"iconButton" + (!editing ? " active" : "")}
-                  title="Reading view"
-                  aria-label="Reading view"
-                  disabled={props.busy}
-                  onClick={() => setEditingPageId(null)}
-                >
-                  <EyeIcon />
-                </button>
-                <button
-                  type="button"
                   className={"iconButton" + (editing ? " active" : "")}
-                  title="Edit page"
-                  aria-label="Edit page"
+                  title={editing ? "Reading view" : "Edit page"}
+                  aria-label={editing ? "Switch to reading view" : "Switch to edit mode"}
                   disabled={props.busy}
                   onClick={() => {
-                    setEditingPageId(page.id);
-                    setPageDraft(page.content);
+                    if (editing) {
+                      setEditingPageId(null);
+                    } else {
+                      setEditingPageId(page.id);
+                      setPageDraft(page.content);
+                    }
                   }}
                 >
-                  <PencilIcon />
+                  {editing ? <EyeIcon /> : <PencilIcon />}
                 </button>
               </div>
             ) : null}

@@ -168,23 +168,13 @@ function DocumentReadEditActions(props: {
       </button>
       <button
         type="button"
-        className={"iconButton" + (!props.editing ? " active" : "")}
-        title="Reading view"
-        aria-label="Reading view"
-        disabled={props.disabled}
-        onClick={() => props.onEditingChange(false)}
-      >
-        <EyeIcon />
-      </button>
-      <button
-        type="button"
         className={"iconButton" + (props.editing ? " active" : "")}
-        title="Edit markdown"
-        aria-label="Edit markdown"
+        title={props.editing ? "Reading view" : "Edit markdown"}
+        aria-label={props.editing ? "Switch to reading view" : "Switch to edit mode"}
         disabled={props.disabled}
-        onClick={() => props.onEditingChange(true)}
+        onClick={() => props.onEditingChange(!props.editing)}
       >
-        <PencilIcon />
+        {props.editing ? <EyeIcon /> : <PencilIcon />}
       </button>
     </>
   );

@@ -945,6 +945,14 @@ button:disabled {
   min-height: 38px;
 }
 
+.buttonWithSpinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-width: 98px;
+}
+
 .spinner {
   width: 14px;
   height: 14px;
@@ -952,6 +960,10 @@ button:disabled {
   border-top-color: #fff;
   border-radius: 999px;
   animation: spin 0.8s linear infinite;
+}
+
+.buttonSpinner {
+  flex: 0 0 auto;
 }
 
 .generationOverlay {
@@ -1966,6 +1978,22 @@ button.secondary {
   background: var(--ink);
   border-color: var(--ink);
   color: #fff;
+}
+
+.copyToast {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 220;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--ink);
+  color: #fff;
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .dangerIconButton {

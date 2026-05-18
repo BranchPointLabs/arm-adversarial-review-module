@@ -17,6 +17,7 @@ export type DiagramDocumentViewProps = {
   onCodeEditingChange: (editing: boolean) => void;
   onSaveCode: () => void;
   onOpenAddCard: () => void;
+  onCopy: () => void;
 };
 
 export default function DiagramDocumentView(props: DiagramDocumentViewProps) {
@@ -31,7 +32,7 @@ export default function DiagramDocumentView(props: DiagramDocumentViewProps) {
             className="iconButton"
             title="Copy Mermaid"
             aria-label="Copy Mermaid"
-            onClick={() => void navigator.clipboard.writeText(props.mermaidDraft)}
+            onClick={props.onCopy}
           >
             <CopyIcon />
           </button>

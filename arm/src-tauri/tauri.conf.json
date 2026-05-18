@@ -3,9 +3,8 @@
   "version": "0.0.1",
   "identifier": "com.branchpointlabs.arm",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run build",
     "beforeBuildCommand": "npm run build",
-    "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
   "app": {

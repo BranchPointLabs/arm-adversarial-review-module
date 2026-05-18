@@ -99,6 +99,8 @@ export default function ProjectWorkspace() {
   const [resolveKind, setResolveKind] = React.useState<ResolveKind>("patch");
   const [resolveText, setResolveText] = React.useState("");
   const [resolveStatus, setResolveStatus] = React.useState<string | null>(null);
+  const [resolveBusy, setResolveBusy] = React.useState(false);
+  const [copyToastVisible, setCopyToastVisible] = React.useState(false);
 
   const [planOpen, setPlanOpen] = React.useState(false);
   const [planStage, setPlanStage] = React.useState<PlanStage>("setup");
@@ -123,6 +125,7 @@ export default function ProjectWorkspace() {
   const repairedStructuredCardIdsRef = React.useRef<Set<string>>(new Set());
   const autosaveTimerRef = React.useRef<number | null>(null);
   const autosavingDocumentIdRef = React.useRef<string | null>(null);
+  const copyToastTimerRef = React.useRef<number | null>(null);
 
   const route = parseRoute(location.pathname);
   const currentView = route.view;
@@ -148,6 +151,7 @@ export default function ProjectWorkspace() {
     setDiagramMermaidDraft,
     setDiagramCodeEditing,
     setPlanGenerating,
+    onCopySuccess: showCopyToast,
     refreshAll,
     navigate,
   });
@@ -243,8 +247,31 @@ export default function ProjectWorkspace() {
   React.useEffect(() => {
     return () => {
       safeSpeechCancel();
+      if (copyToastTimerRef.current !== null) {
+        window.clearTimeout(copyToastTimerRef.current);
+      }
     };
   }, []);
+
+  function showCopyToast() {
+    setCopyToastVisible(true);
+    if (copyToastTimerRef.current !== null) {
+      window.clearTimeout(copyToastTimerRef.current);
+    }
+    copyToastTimerRef.current = window.setTimeout(() => {
+      setCopyToastVisible(false);
+      copyToastTimerRef.current = null;
+    }, 1400);
+  }
+
+  async function copyDiagramMermaidNow() {
+    try {
+      await navigator.clipboard.writeText(diagramMermaidDraft);
+      showCopyToast();
+    } catch (error: any) {
+      setErrorModalMessage(typeof error === "string" ? error : error?.message || "Copy failed.");
+    }
+  }
 
   React.useEffect(() => {
     if (!projectPath || cards.length === 0) return;
@@ -825,6 +852,7 @@ export default function ProjectWorkspace() {
     setResolveKind("patch");
     setResolveText(card.proposedUpdate || card.body);
     setResolveStatus(null);
+    setResolveBusy(false);
   }
 
   async function resolveCardNow() {
@@ -840,6 +868,7 @@ export default function ProjectWorkspace() {
     }
 
     setBusy(true);
+    setResolveBusy(true);
     try {
       const nextMarkdown =
         resolveKind === "patch"
@@ -859,6 +888,7 @@ export default function ProjectWorkspace() {
     } catch (error: any) {
       setResolveStatus(typeof error === "string" ? error : error?.message || "Resolve failed.");
     } finally {
+      setResolveBusy(false);
       setBusy(false);
     }
   }
@@ -926,6 +956,7 @@ export default function ProjectWorkspace() {
             onCodeEditingChange: setDiagramCodeEditing,
             onSaveCode: () => void saveDiagramCodeNow(),
             onOpenAddCard: openAddDiagramCard,
+            onCopy: () => void copyDiagramMermaidNow(),
           }}
           plan={{
             markdown: documentMarkdown,
@@ -1228,8 +1259,9 @@ export default function ProjectWorkspace() {
               <button type="button" className="secondary" onClick={() => setResolveCard(null)}>
                 Cancel
               </button>
-              <button type="button" className="primary" onClick={() => void resolveCardNow()} disabled={busy}>
-                Resolve
+              <button type="button" className="primary buttonWithSpinner" onClick={() => void resolveCardNow()} disabled={busy || resolveBusy}>
+                {resolveBusy ? <span className="spinner buttonSpinner" aria-hidden="true" /> : null}
+                <span>Resolve</span>
               </button>
             </>
           }
@@ -1254,6 +1286,12 @@ export default function ProjectWorkspace() {
             {resolveStatus ? <div className="status">{resolveStatus}</div> : null}
           </div>
         </Modal>
+      ) : null}
+
+      {copyToastVisible ? (
+        <div className="copyToast" role="status" aria-live="polite">
+          Copied!
+        </div>
       ) : null}
 
       {errorModalMessage ? (
